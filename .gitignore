@@ -1,0 +1,16 @@
+.env
+node_modules/
+dist/
+client/dist/
+client/node_modules/
+server/node_modules/
+.codex/
+tmp/
+
+# runtime email-send logs
+data/logs/
+
+# runtime user uploads
+data/profile_images/
+data/batch_reviews/
+data/exports/

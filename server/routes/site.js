@@ -1,0 +1,213 @@
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
+const db = require('../db');
+const { auth } = require('../middleware/auth');
+const { seedFooterDocuments } = require('../lib/footer-content');
+const { seedTranslations, normalizeLanguage, SUPPORTED_LANGUAGES } = require('../lib/translations');
+const { getActiveTheme, getThemeNameOverrides } = require('../lib/themes');
+const { parseSpecialPopups } = require('../lib/special-popups');
+const { getShabbatState } = require('../lib/shabbat');
+
+const router = express.Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 }
+});
+
+async function ensureWritableUploadDir(candidates) {
+  let lastError = null;
+  for (const dir of candidates) {
+    try {
+      await fs.promises.mkdir(dir, { recursive: true });
+      await fs.promises.access(dir, fs.constants.W_OK);
+      return dir;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError || new Error('no writable upload directory');
+}
+
+// ───────── גרסת ה-build הנוכחית (לזיהוי גרסה חדשה בצד הלקוח) ─────────
+// מחזיר את build id מתוך dist/version.json שנכתב בכל בנייה. לעולם לא נשמר במטמון.
+const VERSION_FILE = path.join(__dirname, '..', '..', 'client', 'dist', 'version.json');
+router.get('/version', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  fs.readFile(VERSION_FILE, 'utf8', (err, data) => {
+    if (err) return res.json({ build: null });
+    try {
+      const parsed = JSON.parse(data);
+      res.json({ build: parsed.build || null });
+    } catch {
+      res.json({ build: null });
+    }
+  });
+});
+
+router.get('/shabbat', auth(false), async (req, res) => {
+  try {
+    const row = await db.one("SELECT `value` FROM settings WHERE `key` = 'shabbat_mode'");
+    // ברירת מחדל: פעיל (TRUE) כל עוד לא כובה במפורש
+    const enabled = row == null ? true : ['1', 'true', 'on', 'yes'].includes(String(row.value).toLowerCase());
+    if (!enabled) return res.json({ enabled: false, active: false });
+
+    let tz = String(req.query.tz || '').trim();
+    const state = await getShabbatState(tz);
+    return res.json({ enabled: true, ...state });
+  } catch (e) {
+    console.error('site/shabbat:', e.message);
+    // אם Hebcal לא זמין — לא חוסמים את האתר
+    return res.json({ enabled: true, active: false, error: 'unavailable' });
+  }
+});
+
+// דגלי תכונות ציבוריים ללקוח (שיחים / מוצרים / קרבות)
+router.get('/features', auth(false), async (req, res) => {
+  try {
+    const row = await db.one("SELECT `value` FROM settings WHERE `key` = 'coins_system_enabled'");
+    // ברירת מחדל: פעיל (TRUE) כל עוד לא כובה במפורש
+    const coinsEnabled = row == null ? true : ['1', 'true', 'on', 'yes'].includes(String(row.value).toLowerCase());
+    // טבלת מצטייני שיחים — ברירת מחדל כבויה (FALSE) עד שמופעלת במפורש
+    const lbRow = await db.one("SELECT `value` FROM settings WHERE `key` = 'coins_leaderboard_enabled'");
+    const coinsLeaderboardEnabled = lbRow == null ? false : ['1', 'true', 'on', 'yes'].includes(String(lbRow.value).toLowerCase());
+    // דירוג מוצרים וקרבות השוואה — פעילים כל עוד לא כובו במפורש ('false')
+    const prodRow = await db.one("SELECT `value` FROM settings WHERE `key` = 'site_products_enabled'");
+    const productsEnabled = prodRow == null ? true : String(prodRow.value).trim().toLowerCase() !== 'false';
+    const battlesRow = await db.one("SELECT `value` FROM settings WHERE `key` = 'site_battles_enabled'");
+    const battlesEnabled = battlesRow == null ? true : String(battlesRow.value).trim().toLowerCase() !== 'false';
+    res.json({
+      coins_enabled: coinsEnabled,
+      coins_leaderboard_enabled: coinsLeaderboardEnabled,
+      products_enabled: productsEnabled,
+      battles_enabled: battlesEnabled
+    });
+  } catch (e) {
+    console.error('site/features:', e.message);
+    res.json({ coins_enabled: true, coins_leaderboard_enabled: false, products_enabled: true, battles_enabled: true });
+  }
+});
+
+router.get('/footer-docs', auth(false), async (req, res) => {
+  try {
+    await db.tx(async (t) => seedFooterDocuments(t));
+    const rows = await db.query(`
+      SELECT id, doc_key, label, file_url, file_type, sort_order
+      FROM footer_documents
+      ORDER BY sort_order ASC, id ASC
+    `);
+    res.json(rows);
+  } catch (e) {
+    console.error('site/footer-docs:', e);
+    res.status(500).json({ error: 'שגיאת שרת' });
+  }
+});
+
+router.get('/translations', auth(false), async (req, res) => {
+  try {
+    await db.tx(async (t) => seedTranslations(t));
+    const language = normalizeLanguage(String(req.query.lang || 'he').toLowerCase());
+    const rows = await db.query(`
+      SELECT translation_key, translation_value
+      FROM translations
+      WHERE language_code = ?
+      ORDER BY translation_key ASC
+    `, [language]);
+    const items = Object.fromEntries(rows.map((row) => [row.translation_key, row.translation_value]));
+
+    // דריסת שמות (תפריט / שם אפליקציה) לפי ערכת הנושא הפעילה
+    const overrides = getThemeNameOverrides();
+    for (const [key, byLang] of Object.entries(overrides)) {
+      const val = byLang && (byLang[language] || byLang.he || byLang.en);
+      if (val) items[key] = val;
+    }
+
+    res.json({ language, supported_languages: SUPPORTED_LANGUAGES, items });
+  } catch (e) {
+    console.error('site/translations:', e);
+    res.status(500).json({ error: 'שגיאת שרת' });
+  }
+});
+
+// קונפיגורציית ערכת הנושא הפעילה (צבעים / נכסים / תמונות תגים)
+router.get('/theme', auth(false), async (req, res) => {
+  try {
+    res.json(getActiveTheme());
+  } catch (e) {
+    console.error('site/theme:', e);
+    res.status(500).json({ error: 'שגיאת שרת' });
+  }
+});
+
+// משקלי הניקוד: ניחוש מדויק / סטייה של רמה אחת
+router.get('/scoring', auth(false), async (req, res) => {
+  try {
+    const keys = ['scoring_exact', 'scoring_close'];
+    const rows = await db.query(`
+      SELECT \`key\`, \`value\`
+      FROM settings
+      WHERE \`key\` IN (${keys.map(() => '?').join(', ')})
+    `, keys);
+    const values = Object.fromEntries(rows.map((row) => [row.key, Number(row.value || 0)]));
+    res.json({
+      exact: values.scoring_exact || 5,
+      close: values.scoring_close || 2
+    });
+  } catch (e) {
+    console.error('site/scoring:', e);
+    res.status(500).json({ error: 'שגיאת שרת' });
+  }
+});
+
+router.get('/special-popups', auth(false), async (req, res) => {
+  try {
+    const row = await db.one("SELECT `value` FROM settings WHERE `key` = 'special_popups'");
+    const items = parseSpecialPopups(row?.value, { useDefaultsWhenMissing: true });
+    res.json(items);
+  } catch (e) {
+    console.error('site/special-popups:', e);
+    res.status(500).json({ error: 'שגיאת שרת' });
+  }
+});
+
+router.post('/contact', auth(false), upload.single('image'), async (req, res) => {
+  try {
+    await db.tx(async (t) => seedFooterDocuments(t));
+    const name = String(req.body?.name || req.user?.name || '').trim();
+    const phone = String(req.body?.phone_number || '').trim();
+    const message = String(req.body?.message || '').trim();
+
+    if (!name || !message) {
+      return res.status(400).json({ error: 'יש להזין שם והודעה' });
+    }
+
+    let imageUrl = null;
+    if (req.file) {
+      const ext = path.extname(req.file.originalname || '').toLowerCase() || '.jpg';
+      const safeExt = ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext) ? ext : '.jpg';
+      const rootDir = await ensureWritableUploadDir([
+        path.join(__dirname, '..', '..', 'data', 'contact_messages'),
+        path.join(__dirname, '..', '..', 'data', 'profile_images', 'contact_messages')
+      ]);
+      const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}${safeExt}`;
+      const fullPath = path.join(rootDir, fileName);
+      await fs.promises.writeFile(fullPath, req.file.buffer);
+      imageUrl = rootDir.includes(`${path.sep}profile_images${path.sep}`)
+        ? `/data/profile_images/contact_messages/${fileName}`
+        : `/data/contact_messages/${fileName}`;
+    }
+
+    await db.run(`
+      INSERT INTO contact_messages (user_id, name, phone_number, message, image_url)
+      VALUES (?, ?, ?, ?, ?)
+    `, [req.user?.id || null, name, phone || null, message, imageUrl]);
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('site/contact:', e);
+    res.status(500).json({ error: 'שליחת הפנייה נכשלה' });
+  }
+});
+
+module.exports = router;

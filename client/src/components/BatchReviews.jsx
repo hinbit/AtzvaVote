@@ -1,0 +1,100 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import api from '../api/client';
+import { useTranslation } from '../i18n/TranslationContext';
+import { useAuth } from '../context/AuthContext';
+
+// רשימת ריביוים (פתקי טעימה) מתקפלת מתחת לכל אצווה. נטענת בעצלתיים בעת פתיחה,
+// ומתרעננת כש-bump משתנה (אחרי פרסום ריביו חדש).
+export default function BatchReviews({ batchId, bump = 0 }) {
+  const { t, locale } = useTranslation();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState(null);
+  const [count, setCount] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    api.get(`/reviews/batch/${batchId}?lang=${locale}`)
+      .then(r => { setRows(r.data || []); setCount((r.data || []).length); })
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  };
+
+  // טען רק כשנפתח; רענן בעת פרסום אם פתוח
+  useEffect(() => { if (open) load(); }, [open]);
+  useEffect(() => { if (open) load(); /* eslint-disable-next-line */ }, [bump]);
+
+  const toggleVote = (rev) => {
+    // עדכון אופטימי
+    setRows(rs => rs.map(r => r.id === rev.id
+      ? { ...r, my_vote: !r.my_vote, vote_count: r.vote_count + (r.my_vote ? -1 : 1) }
+      : r));
+    api.post(`/reviews/${rev.id}/vote`)
+      .then(res => setRows(rs => rs.map(r => r.id === rev.id
+        ? { ...r, my_vote: res.data.voted, vote_count: res.data.vote_count } : r)))
+      .catch(() => load()); // במקרה כשל — רענון מהשרת
+  };
+
+  const label = count != null ? t('reviews.show', { count }) : t('reviews.show_empty');
+
+  return (
+    <div className="match-reviews">
+      <button type="button" className="match-reviews-toggle" onClick={() => setOpen(o => !o)}>
+        <span>{open ? '▾' : '▸'}</span> {label}
+      </button>
+
+      {open && (
+        <div className="match-reviews-body">
+          {loading && <div className="match-reviews-empty">{t('common.loading')}</div>}
+          {!loading && rows && rows.length === 0 && (
+            <div className="match-reviews-empty">{t('reviews.none')}</div>
+          )}
+          {!loading && rows && rows.map(rev => (
+            <div key={rev.id} className="review-card" dir="rtl">
+              <div className="review-card-head">
+                {rev.profile_image_url
+                  ? <img className="review-avatar" src={rev.profile_image_url} alt="" />
+                  : <span className="review-avatar review-avatar-blank" aria-hidden="true">👤</span>}
+                <span className="review-author">{rev.user_name}</span>
+                {rev.include_prediction && rev.pred_level != null && (
+                  <span className="review-pred-chip" dir="ltr">
+                    🌿 {Number(rev.pred_level)}/5
+                  </span>
+                )}
+              </div>
+              {rev.body && <div className="review-body">{rev.body}</div>}
+              {rev.audio_url && <audio className="review-audio" controls src={rev.audio_url} />}
+              <div className="review-vote-row">
+                {rev.user_id === user?.id ? (
+                  <span className="review-vote-count">👂 {rev.vote_count}</span>
+                ) : (
+                  <button
+                    type="button"
+                    className={`review-vote-btn ${rev.my_vote ? 'voted' : ''}`}
+                    onClick={() => toggleVote(rev)}
+                    title={t('reviews.vote_tip')}
+                  >
+                    {rev.my_vote ? '❤️' : '👂'} <span>{t('reviews.vote_action')}</span> · {rev.vote_count}
+                  </button>
+                )}
+                {user && !user.isGuest && rev.user_id !== user?.id && (
+                  <button
+                    type="button"
+                    className="review-challenge-btn"
+                    onClick={() => navigate('/coin-bets', { state: { challenge: { userId: rev.user_id, userName: rev.user_name, batchId } } })}
+                    title={t('reviews.challenge_cta', { name: rev.user_name })}
+                  >
+                    ⚔️ {t('reviews.challenge_short')}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

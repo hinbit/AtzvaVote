@@ -1,0 +1,56 @@
+{
+  "name": "friends",
+  "display_name": {
+    "he": "חברים",
+    "en": "Friends",
+    "ar": "أصدقاء"
+  },
+  "meta": {
+    "theme_color": "#241733",
+    "title": {
+      "he": "הצבעת אצווה · חברים",
+      "en": "AtzvaVote · Friends",
+      "ar": "تصويت الدفعة · أصدقاء"
+    }
+  },
+  "assets": {
+    "logo": "logo.png",
+    "bg1": "bg1.png",
+    "bg2": "bg2.png",
+    "favicon": "favicon.svg"
+  },
+  "colors": {
+    "ink": "#241733",
+    "ink-2": "#34204d",
+    "ink-soft": "#463063",
+    "paper": "#fbf6ef",
+    "paper-pure": "#ffffff",
+    "paper-dim": "#f1e7da",
+    "gold": "#ffc24b",
+    "gold-deep": "#e09a1f",
+    "crimson": "#ff5c8a",
+    "crimson-deep": "#c93e68",
+    "pitch": "#7c5cff",
+    "pitch-deep": "#5a3fcf",
+    "hot-orange": "#ff7a3d",
+    "muted": "#6f6480"
+  },
+  "names": {
+    "common.app_name": {
+      "he": "מונדיאל החברים 2026",
+      "en": "Friends Cup 2026",
+      "ar": "كأس الأصدقاء 2026"
+    },
+    "nav.leaderboard": {
+      "he": "מי המלך?",
+      "en": "Who's the King?",
+      "ar": "من الملك؟"
+    },
+    "nav.guess_groups": {
+      "he": "החבר'ה",
+      "en": "The Crew",
+      "ar": "الشلّة"
+    }
+  },
+  "badges": {}
+}

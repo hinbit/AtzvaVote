@@ -1,0 +1,56 @@
+{
+  "name": "4pharma",
+  "display_name": {
+    "he": "פארמה",
+    "en": "4Pharma",
+    "ar": "فارما"
+  },
+  "meta": {
+    "theme_color": "#10242b",
+    "title": {
+      "he": "הצבעת אצווה · פארמה",
+      "en": "AtzvaVote · 4Pharma",
+      "ar": "تصويت الدفعة · فارما"
+    }
+  },
+  "assets": {
+    "logo": "logo.png",
+    "bg1": "bg1.png",
+    "bg2": "bg2.png",
+    "favicon": "favicon.svg"
+  },
+  "colors": {
+    "ink": "#10242b",
+    "ink-2": "#173a44",
+    "ink-soft": "#235059",
+    "paper": "#f1f7f6",
+    "paper-pure": "#ffffff",
+    "paper-dim": "#e2efed",
+    "gold": "#16b3a3",
+    "gold-deep": "#0d8576",
+    "crimson": "#e2574e",
+    "crimson-deep": "#b23a33",
+    "pitch": "#1f9d77",
+    "pitch-deep": "#156b52",
+    "hot-orange": "#f08a3c",
+    "muted": "#5f7a7a"
+  },
+  "names": {
+    "common.app_name": {
+      "he": "מונדיאל פארמה 2026",
+      "en": "Pharma Cup 2026",
+      "ar": "كأس فارما 2026"
+    },
+    "nav.leaderboard": {
+      "he": "טבלת המומחים",
+      "en": "Experts Board",
+      "ar": "لوحة الخبراء"
+    },
+    "nav.guess_groups": {
+      "he": "צוותי משמרת",
+      "en": "Shift Teams",
+      "ar": "فرق الورديات"
+    }
+  },
+  "badges": {}
+}

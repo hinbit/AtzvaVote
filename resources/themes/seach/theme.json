@@ -1,0 +1,44 @@
+{
+  "name": "seach",
+  "display_name": {
+    "he": "שיח",
+    "en": "Seach",
+    "ar": "سياتش"
+  },
+  "meta": {
+    "theme_color": "#0d1f2d",
+    "title": {
+      "he": "הצבעת אצווה · שיח",
+      "en": "AtzvaVote · Seach",
+      "ar": "تصويت الدفعة · سياتش"
+    }
+  },
+  "assets": {
+    "logo": "logo-green.png",
+    "bg1": "bg1.png",
+    "bg2": "bg2.png",
+    "favicon": "favicon.svg"
+  },
+  "colors": {
+    "header-bg": "rgba(144, 238, 144, 0.5)",
+    "header-fg": "#14310f",
+    "header-fg-dim": "rgba(20,49,15,0.72)",
+    "header-active": "#1d4a2a",
+    "header-hover": "rgba(0,0,0,0.06)",
+    "ink": "#0a1420",
+    "ink-2": "#15263a",
+    "ink-soft": "#1f3349",
+    "paper": "#f5f0e6",
+    "paper-pure": "#ffffff",
+    "paper-dim": "#e9e2d2",
+    "gold": "#e6b54a",
+    "gold-deep": "#b88a1a",
+    "crimson": "#c1272d",
+    "crimson-deep": "#8a1a1f",
+    "pitch": "#2d6e3e",
+    "pitch-deep": "#1d4a2a",
+    "hot-orange": "#f26b2e",
+    "muted": "#6b7280"
+  },
+  "names": {}
+}

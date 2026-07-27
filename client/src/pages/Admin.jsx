@@ -1,0 +1,3551 @@
+// דף ניהול - מנהל בלבד
+// ----------------------------------------------------------------
+// טאבים: סקירה / משתמשים / אצוות / פרסים / קרבות / הגדרות / פעולות
+// ----------------------------------------------------------------
+import { useEffect, useState } from 'react';
+import api, { errMsg } from '../api/client';
+import { useTranslation } from '../i18n/TranslationContext';
+import { useAuth } from '../context/AuthContext';
+import { ilDate, ilDateTime } from '../utils/time';
+import { BATCH_STAGES, PRODUCT_CRITERIA, stageLabel, criterionLabel } from '../lib/stages';
+
+export default function Admin() {
+  const [tab, setTab] = useState('overview');
+  const { t } = useTranslation();
+  const { user } = useAuth();
+  const isFullAdmin = !!user?.isAdmin;
+  // מנהל-משנה (manager) רואה רק את הטאבים של ניהול משתמשים ואצוות
+  const MANAGER_TABS = ['overview', 'users', 'batches'];
+  const allTabs = [
+    { id: 'overview', label: t('admin.tab_overview') },
+    { id: 'users', label: t('admin.tab_users') },
+    { id: 'departments', label: t('admin.tab_departments') },
+    { id: 'batches', label: 'אצוות' },
+    { id: 'prizes', label: 'פרסים' },
+    { id: 'battles', label: 'קרבות' },
+    { id: 'settings', label: t('admin.tab_settings') },
+    { id: 'missing', label: 'דירוגים חסרים' },
+    { id: 'badges', label: t('admin.tab_badges') },
+    { id: 'messages', label: 'שליחת הודעות' },
+    { id: 'contact', label: 'צור קשר' },
+    { id: 'schedule', label: t('admin.tab_schedule') },
+    { id: 'actions', label: t('admin.tab_actions') }
+  ];
+  const tabs = isFullAdmin ? allTabs : allTabs.filter(item => MANAGER_TABS.includes(item.id));
+
+  return (
+    <div className="page">
+      <h1 className="page-title">
+        {t('admin.title')}
+      </h1>
+      <p className="page-subtitle">{t('admin.subtitle')}</p>
+
+      <div className="tabs" style={{ marginBottom: 32 }}>
+        {tabs.map(item => (
+          <button
+            key={item.id}
+            className={`tab ${tab === item.id ? 'active' : ''}`}
+            onClick={() => setTab(item.id)}
+          >{item.label}</button>
+        ))}
+      </div>
+
+      {tab === 'overview' && <OverviewTab />}
+      {tab === 'users'    && <UsersTab    />}
+      {tab === 'departments' && <DepartmentsTab />}
+      {tab === 'batches'  && <BatchesTab  />}
+      {tab === 'prizes'   && <PrizesTab   />}
+      {tab === 'battles'  && <BattlesTab  />}
+      {tab === 'settings' && <SettingsTab />}
+      {tab === 'missing'  && <MissingGuessesTab />}
+      {tab === 'badges'   && <BadgesTab   />}
+      {tab === 'messages' && <MessagesTab />}
+      {tab === 'contact'  && <ContactTab  />}
+      {tab === 'schedule' && <ScheduleTab />}
+      {tab === 'actions'  && <ActionsTab  />}
+    </div>
+  );
+}
+
+/* ─────────────── אצוות ─────────────── */
+const inputStyle = (w) => ({ display: 'block', marginTop: 4, width: w, minWidth: w, padding: '8px 10px', border: '1px solid var(--paper-dim)', borderRadius: 8, background: 'var(--paper-pure)' });
+
+const EMPTY_BATCH = { code: '', name: '', name_en: '', description: '', stage: 'growing', sales_target: '', quarter: '', product_id: '' };
+
+function BatchesTab() {
+  const [batches, setBatches] = useState([]);
+  const [filter, setFilter] = useState('active');
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState(EMPTY_BATCH);
+  const [busy, setBusy] = useState(false);
+  const [outcomeDraft, setOutcomeDraft] = useState({}); // { batchId: { level, sold } }
+  const [editing, setEditing] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+  const [editBusy, setEditBusy] = useState(false);
+
+  const load = () => {
+    api.get('/admin/batches')
+      .then(r => setBatches(r.data || []))
+      .catch(e => setErr(errMsg(e)));
+  };
+  useEffect(load, []);
+
+  const isFinished = (b) => b.outcome_level != null || b.status === 'finished';
+
+  const patchBatch = async (batch, fields, successMsg) => {
+    setErr(''); setOk('');
+    try {
+      await api.patch(`/admin/batches/${batch.id}`, fields);
+      if (successMsg) setOk(successMsg);
+      load();
+      return true;
+    } catch (e) { setErr(errMsg(e)); return false; }
+  };
+
+  const updOutcome = (id, key, value) =>
+    setOutcomeDraft(s => ({ ...s, [id]: { ...(s[id] || {}), [key]: value } }));
+
+  const closeBatch = async (batch) => {
+    const d = outcomeDraft[batch.id] || {};
+    const level = parseInt(d.level, 10);
+    const sold = parseInt(d.sold, 10);
+    if (!Number.isInteger(level) || level < 1 || level > 5) { setErr('יש לבחור רמת תוצאה 1-5'); return; }
+    if (!Number.isInteger(sold) || sold < 0) { setErr('יש להזין כמות יחידות שנמכרו (0 ומעלה)'); return; }
+    if (!confirm(`לסגור את אצווה ${batch.code} עם תוצאה ${level} ולחשב ניקוד לכל המדרגים?`)) return;
+    setErr(''); setOk('');
+    try {
+      await api.post(`/admin/batches/${batch.id}/outcome`, { outcome_level: level, sold_units: sold });
+      setOk(`אצווה ${batch.code} נסגרה והניקוד חושב`);
+      setOutcomeDraft(s => { const c = { ...s }; delete c[batch.id]; return c; });
+      load();
+    } catch (e) { setErr(errMsg(e)); }
+  };
+
+  const clearOutcome = async (batch) => {
+    if (!confirm(`לנקות את התוצאה של אצווה ${batch.code}? הנקודות יבוטלו והאצווה תיפתח מחדש.`)) return;
+    setErr(''); setOk('');
+    try {
+      await api.delete(`/admin/batches/${batch.id}/outcome`);
+      setOk(`התוצאה של אצווה ${batch.code} נוקתה`);
+      load();
+    } catch (e) { setErr(errMsg(e)); }
+  };
+
+  const removeBatch = async (batch) => {
+    if (!confirm(`למחוק את אצווה ${batch.code} (${batch.name})? פעולה זו אינה הפיכה.`)) return;
+    setErr(''); setOk('');
+    try {
+      await api.delete(`/admin/batches/${batch.id}`);
+      setOk(`אצווה ${batch.code} נמחקה`);
+      load();
+    } catch (e) { setErr(errMsg(e)); }
+  };
+
+  const recalcAll = async () => {
+    if (!confirm('לחשב מחדש את הניקוד לכל האצוות שהסתיימו?')) return;
+    setErr(''); setOk('');
+    try {
+      await api.post('/admin/recalculate');
+      setOk('חישוב מחדש של כל האצוות הושלם');
+      load();
+    } catch (e) { setErr(errMsg(e)); }
+  };
+
+  const createBatch = async () => {
+    if (!draft.code.trim() || !draft.name.trim()) { setErr('יש להזין קוד ושם לאצווה'); return; }
+    setBusy(true); setErr(''); setOk('');
+    try {
+      const payload = {
+        code: draft.code.trim(),
+        name: draft.name.trim(),
+        name_en: draft.name_en.trim(),
+        description: draft.description.trim(),
+        stage: draft.stage,
+        sales_target: draft.sales_target === '' ? null : Number(draft.sales_target),
+        quarter: draft.quarter.trim()
+      };
+      if (draft.product_id !== '') payload.product_id = Number(draft.product_id);
+      await api.post('/admin/batches', payload);
+      setOk(`אצווה ${payload.code} נוצרה`);
+      setDraft(EMPTY_BATCH);
+      setCreating(false);
+      load();
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+  };
+
+  const openEdit = (batch) => {
+    setErr(''); setOk('');
+    setEditing(batch);
+    setEditDraft({
+      code: batch.code || '',
+      name: batch.name || '',
+      name_en: batch.name_en || '',
+      description: batch.description || '',
+      sales_target: batch.sales_target ?? '',
+      quarter: batch.quarter || ''
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!editing || !editDraft) return;
+    setEditBusy(true);
+    const done = await patchBatch(editing, {
+      code: editDraft.code.trim(),
+      name: editDraft.name.trim(),
+      name_en: editDraft.name_en.trim(),
+      description: editDraft.description.trim(),
+      sales_target: editDraft.sales_target === '' ? null : Number(editDraft.sales_target),
+      quarter: editDraft.quarter.trim()
+    }, `אצווה ${editDraft.code} עודכנה`);
+    setEditBusy(false);
+    if (done) { setEditing(null); setEditDraft(null); }
+  };
+
+  const filtered = batches.filter(b => {
+    if (filter === 'all')      return true;
+    if (filter === 'finished') return isFinished(b);
+    return !isFinished(b);
+  });
+
+  return (
+    <div>
+      <div className="tabs" style={{ marginBottom: 16 }}>
+        <button className={`tab ${filter === 'active' ? 'active' : ''}`} onClick={() => setFilter('active')}>פעילות</button>
+        <button className={`tab ${filter === 'finished' ? 'active' : ''}`} onClick={() => setFilter('finished')}>הסתיימו</button>
+        <button className={`tab ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>הכל</button>
+      </div>
+
+      {err && <div className="alert alert-error">{err}</div>}
+      {ok  && <div className="alert alert-success">{ok}</div>}
+
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
+        <button className="btn btn-sm btn-gold" onClick={() => setCreating(c => !c)}>
+          {creating ? 'סגור טופס' : 'הוסף אצווה'}
+        </button>
+        <button className="btn btn-sm btn-outline" onClick={recalcAll}>חשב מחדש הכל</button>
+      </div>
+
+      {creating && (
+        <div style={{ background: 'var(--paper-pure)', border: '1px solid var(--line)', borderRadius: 6, padding: 24, marginBottom: 16 }}>
+          <h3 style={{ marginTop: 0, fontFamily: 'var(--font-display)' }}>אצווה חדשה</h3>
+          <div className="admin-form-grid">
+            <div className="field">
+              <label>קוד אצווה</label>
+              <input value={draft.code} onChange={e => setDraft(s => ({ ...s, code: e.target.value }))} placeholder="לדוגמה: B-2026-014" />
+            </div>
+            <div className="field">
+              <label>שם (עברית)</label>
+              <input value={draft.name} onChange={e => setDraft(s => ({ ...s, name: e.target.value }))} />
+            </div>
+            <div className="field">
+              <label>שם (אנגלית)</label>
+              <input dir="ltr" value={draft.name_en} onChange={e => setDraft(s => ({ ...s, name_en: e.target.value }))} />
+            </div>
+            <div className="field">
+              <label>שלב נוכחי</label>
+              <select value={draft.stage} onChange={e => setDraft(s => ({ ...s, stage: e.target.value }))}>
+                {BATCH_STAGES.map(st => <option key={st.key} value={st.key}>{st.emoji} {st.label_he}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>יעד מכירות (יחידות)</label>
+              <input type="number" min="0" value={draft.sales_target} onChange={e => setDraft(s => ({ ...s, sales_target: e.target.value }))} />
+            </div>
+            <div className="field">
+              <label>רבעון</label>
+              <input dir="ltr" value={draft.quarter} onChange={e => setDraft(s => ({ ...s, quarter: e.target.value }))} placeholder="2026-Q3" />
+            </div>
+            <div className="field">
+              <label>מזהה מוצר בקטלוג (אופציונלי)</label>
+              <input type="number" min="1" value={draft.product_id} onChange={e => setDraft(s => ({ ...s, product_id: e.target.value }))} />
+            </div>
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
+              <label>תיאור</label>
+              <textarea rows="2" value={draft.description} onChange={e => setDraft(s => ({ ...s, description: e.target.value }))} />
+            </div>
+          </div>
+          <button className="btn btn-pitch" onClick={createBatch} disabled={busy}>
+            {busy ? 'יוצר...' : 'צור אצווה'}
+          </button>
+        </div>
+      )}
+
+      <div className="table-wrap" style={{ background: 'var(--paper-pure)', border: '1px solid var(--line)', borderRadius: 6 }}>
+        <table className="leaderboard-table">
+          <thead>
+            <tr>
+              <th>קוד</th>
+              <th>שם</th>
+              <th>שלב</th>
+              <th>דירוג פתוח</th>
+              <th>דירוגים</th>
+              <th>ממוצע</th>
+              <th>רבעון</th>
+              <th>סטטוס</th>
+              <th>תוצאה (מול יעד {'‏'}1-5)</th>
+              <th>פעולות</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(b => {
+              const d = outcomeDraft[b.id] || {};
+              const finished = isFinished(b);
+              return (
+                <tr key={b.id}>
+                  <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{b.code}</td>
+                  <td>
+                    <strong>{b.name}</strong>
+                    {b.name_en && <div style={{ fontSize: 12, color: 'var(--muted)' }} dir="ltr">{b.name_en}</div>}
+                  </td>
+                  <td>
+                    <select
+                      value={b.stage || 'growing'}
+                      onChange={e => patchBatch(b, { stage: e.target.value }, `אצווה ${b.code} הועברה לשלב ${stageLabel(e.target.value, 'he')}`)}
+                      style={inputStyle(130)}
+                    >
+                      {BATCH_STAGES.map(st => <option key={st.key} value={st.key}>{st.emoji} {st.label_he}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <button
+                      className={`toggle-pill ${b.rating_open ? 'on' : ''}`}
+                      style={{ fontSize: 12 }}
+                      onClick={() => patchBatch(b, { rating_open: !b.rating_open })}
+                    >{b.rating_open ? 'פתוח' : 'סגור'}</button>
+                  </td>
+                  <td>{b.ratings_count ?? 0}</td>
+                  <td>{b.avg_rating != null ? Number(b.avg_rating).toFixed(2) : '—'}</td>
+                  <td dir="ltr">{b.quarter || '—'}</td>
+                  <td>
+                    {finished
+                      ? <span className="deadline-badge ok">הסתיימה</span>
+                      : <span className="deadline-badge">{stageLabel(b.stage, 'he')}</span>}
+                  </td>
+                  <td>
+                    {finished ? (
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 700 }}>
+                          רמה {b.outcome_level} · נמכרו {b.sold_units ?? '—'}
+                          {b.sales_target != null && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> / יעד {b.sales_target}</span>}
+                        </span>
+                        <button className="btn btn-sm btn-outline" onClick={() => clearOutcome(b)}>נקה תוצאה</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <select value={d.level ?? ''} onChange={e => updOutcome(b.id, 'level', e.target.value)} style={inputStyle(90)}>
+                          <option value="">רמה…</option>
+                          {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                        <input
+                          type="number" min="0" placeholder="נמכרו"
+                          value={d.sold ?? ''}
+                          onChange={e => updOutcome(b.id, 'sold', e.target.value)}
+                          style={inputStyle(90)}
+                        />
+                        <button className="btn btn-sm btn-pitch" onClick={() => closeBatch(b)}>סגור אצווה וחשב ניקוד</button>
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <button className="btn btn-sm btn-outline" style={{ marginInlineEnd: 6 }} onClick={() => openEdit(b)}>ערוך</button>
+                    {(b.ratings_count ?? 0) === 0 && (
+                      <button className="btn btn-sm" style={{ background: 'var(--crimson)' }} onClick={() => removeBatch(b)}>מחק</button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {filtered.length === 0 && (
+              <tr><td colSpan={10} style={{ color: 'var(--muted)', textAlign: 'center', padding: 24 }}>אין אצוות בקטגוריה זו</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {editing && editDraft && (
+        <div className="admin-modal-backdrop" onClick={() => setEditing(null)}>
+          <div className="admin-modal" onClick={e => e.stopPropagation()}>
+            <div className="admin-modal-head">
+              <h3>עריכת אצווה · {editing.code}</h3>
+              <button className="btn btn-sm btn-outline" onClick={() => setEditing(null)}>סגור</button>
+            </div>
+            <div className="admin-form-grid">
+              <div className="field">
+                <label>קוד אצווה</label>
+                <input value={editDraft.code} onChange={e => setEditDraft(s => ({ ...s, code: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label>שם (עברית)</label>
+                <input value={editDraft.name} onChange={e => setEditDraft(s => ({ ...s, name: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label>שם (אנגלית)</label>
+                <input dir="ltr" value={editDraft.name_en} onChange={e => setEditDraft(s => ({ ...s, name_en: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label>יעד מכירות (יחידות)</label>
+                <input type="number" min="0" value={editDraft.sales_target} onChange={e => setEditDraft(s => ({ ...s, sales_target: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label>רבעון</label>
+                <input dir="ltr" value={editDraft.quarter} onChange={e => setEditDraft(s => ({ ...s, quarter: e.target.value }))} />
+              </div>
+              <div className="field" style={{ gridColumn: '1 / -1' }}>
+                <label>תיאור</label>
+                <textarea rows="3" value={editDraft.description} onChange={e => setEditDraft(s => ({ ...s, description: e.target.value }))} />
+              </div>
+            </div>
+            <button className="btn btn-pitch" onClick={saveEdit} disabled={editBusy}>
+              {editBusy ? 'שומר...' : 'שמור שינויים'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────── פרסים (חנות נקודות) ─────────────── */
+const EMPTY_PRIZE = { name: '', description: '', cost_points: '', stock: '', sort_order: '', image_url: '' };
+const REDEMPTION_STATUSES = [
+  { key: 'pending',   label: 'ממתין',  cls: '' },
+  { key: 'approved',  label: 'אושר',   cls: 'ok' },
+  { key: 'delivered', label: 'נמסר',   cls: 'ok' },
+  { key: 'cancelled', label: 'בוטל',   cls: 'danger' }
+];
+const redemptionStatusMeta = (status) =>
+  REDEMPTION_STATUSES.find(s => s.key === status) || { key: status, label: status || '—', cls: '' };
+
+function PrizesTab() {
+  const [prizes, setPrizes] = useState([]);
+  const [redemptions, setRedemptions] = useState([]);
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+  const [draft, setDraft] = useState(EMPTY_PRIZE);
+  const [editId, setEditId] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    setErr('');
+    Promise.all([
+      api.get('/prizes/admin/list'),
+      api.get('/prizes/admin/redemptions')
+    ])
+      .then(([listRes, redRes]) => {
+        const listData = listRes.data;
+        setPrizes(Array.isArray(listData) ? listData : (listData?.prizes || listData?.items || []));
+        const redData = redRes.data;
+        setRedemptions(Array.isArray(redData) ? redData : (redData?.redemptions || redData?.items || []));
+      })
+      .catch(e => setErr(errMsg(e)));
+  };
+  useEffect(load, []);
+
+  const startEdit = (p) => {
+    setEditId(p.id);
+    setDraft({
+      name: p.name || '',
+      description: p.description || '',
+      cost_points: p.cost_points ?? '',
+      stock: p.stock ?? '',
+      sort_order: p.sort_order ?? '',
+      image_url: p.image_url || ''
+    });
+  };
+
+  const cancelEdit = () => { setEditId(null); setDraft(EMPTY_PRIZE); };
+
+  const savePrize = async () => {
+    if (!draft.name.trim()) { setErr('יש להזין שם פרס'); return; }
+    setBusy(true); setErr(''); setOk('');
+    try {
+      const payload = {
+        name: draft.name.trim(),
+        description: draft.description.trim(),
+        cost_points: Number(draft.cost_points) || 0,
+        stock: draft.stock === '' ? null : Number(draft.stock),
+        sort_order: Number(draft.sort_order) || 0,
+        image_url: draft.image_url.trim()
+      };
+      if (editId) {
+        await api.patch(`/prizes/admin/${editId}`, payload);
+        setOk(`הפרס "${payload.name}" עודכן`);
+      } else {
+        await api.post('/prizes/admin', payload);
+        setOk(`הפרס "${payload.name}" נוצר`);
+      }
+      cancelEdit();
+      load();
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+  };
+
+  const toggleActive = async (p) => {
+    setErr(''); setOk('');
+    try {
+      await api.patch(`/prizes/admin/${p.id}`, { active: !p.active });
+      load();
+    } catch (e) { setErr(errMsg(e)); }
+  };
+
+  const setRedemptionStatus = async (r, status) => {
+    if (!status || status === r.status) return;
+    setErr(''); setOk('');
+    try {
+      await api.patch(`/prizes/admin/redemptions/${r.id}`, { status });
+      setOk(`המימוש של ${r.user_name} עודכן ל"${redemptionStatusMeta(status).label}"`);
+      load();
+    } catch (e) { setErr(errMsg(e)); }
+  };
+
+  return (
+    <div>
+      {err && <div className="alert alert-error">{err}</div>}
+      {ok  && <div className="alert alert-success">{ok}</div>}
+
+      <div style={{ background: 'var(--paper-pure)', border: '1px solid var(--line)', borderRadius: 6, padding: 24, marginBottom: 16 }}>
+        <h3 style={{ marginTop: 0, fontFamily: 'var(--font-display)' }}>
+          {editId ? 'עריכת פרס' : 'פרס חדש'}
+        </h3>
+        <div className="admin-form-grid">
+          <div className="field">
+            <label>שם הפרס</label>
+            <input value={draft.name} onChange={e => setDraft(s => ({ ...s, name: e.target.value }))} placeholder="לדוגמה: כובע" />
+          </div>
+          <div className="field">
+            <label>עלות בנקודות</label>
+            <input type="number" min="0" value={draft.cost_points} onChange={e => setDraft(s => ({ ...s, cost_points: e.target.value }))} />
+          </div>
+          <div className="field">
+            <label>מלאי</label>
+            <input type="number" min="0" value={draft.stock} onChange={e => setDraft(s => ({ ...s, stock: e.target.value }))} placeholder="ריק = ללא הגבלה" />
+          </div>
+          <div className="field">
+            <label>סדר תצוגה</label>
+            <input type="number" value={draft.sort_order} onChange={e => setDraft(s => ({ ...s, sort_order: e.target.value }))} />
+          </div>
+          <div className="field">
+            <label>כתובת תמונה</label>
+            <input dir="ltr" value={draft.image_url} onChange={e => setDraft(s => ({ ...s, image_url: e.target.value }))} placeholder="https://..." />
+          </div>
+          <div className="field" style={{ gridColumn: '1 / -1' }}>
+            <label>תיאור</label>
+            <textarea rows="2" value={draft.description} onChange={e => setDraft(s => ({ ...s, description: e.target.value }))} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button className="btn btn-pitch" onClick={savePrize} disabled={busy}>
+            {busy ? 'שומר...' : editId ? 'שמור פרס' : 'צור פרס'}
+          </button>
+          {editId && <button className="btn btn-outline" onClick={cancelEdit}>בטל עריכה</button>}
+        </div>
+      </div>
+
+      <div className="table-wrap" style={{ background: 'var(--paper-pure)', border: '1px solid var(--line)', borderRadius: 6, marginBottom: 24 }}>
+        <table className="leaderboard-table">
+          <thead>
+            <tr>
+              <th>שם</th>
+              <th>עלות (נק׳)</th>
+              <th>מלאי</th>
+              <th>מומשו</th>
+              <th>פעיל</th>
+              <th>סדר</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {prizes.map(p => (
+              <tr key={p.id} style={{ opacity: p.active ? 1 : 0.55 }}>
+                <td>
+                  <strong>{p.name}</strong>
+                  {p.description && <div style={{ fontSize: 12, color: 'var(--muted)' }}>{p.description}</div>}
+                </td>
+                <td>{p.cost_points}</td>
+                <td>{p.stock ?? '—'}</td>
+                <td>{p.redeemed_count ?? p.redeemed ?? 0}</td>
+                <td>
+                  <button
+                    className={`toggle-pill ${p.active ? 'on' : ''}`}
+                    style={{ fontSize: 12 }}
+                    onClick={() => toggleActive(p)}
+                  >{p.active ? 'פעיל' : 'מושבת'}</button>
+                </td>
+                <td>{p.sort_order ?? 0}</td>
+                <td>
+                  <button className="btn btn-sm btn-outline" onClick={() => startEdit(p)}>ערוך</button>
+                </td>
+              </tr>
+            ))}
+            {prizes.length === 0 && (
+              <tr><td colSpan={7} style={{ color: 'var(--muted)', textAlign: 'center', padding: 24 }}>אין פרסים עדיין — צור פרס למעלה.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style={{ fontFamily: 'var(--font-display)' }}>מימושים ({redemptions.length})</h3>
+      <div className="table-wrap" style={{ background: 'var(--paper-pure)', border: '1px solid var(--line)', borderRadius: 6 }}>
+        <table className="leaderboard-table">
+          <thead>
+            <tr>
+              <th>משתמש</th>
+              <th>פרס</th>
+              <th>נקודות</th>
+              <th>סטטוס</th>
+              <th>תאריך</th>
+              <th>עדכון סטטוס</th>
+            </tr>
+          </thead>
+          <tbody>
+            {redemptions.map(r => {
+              const meta = redemptionStatusMeta(r.status);
+              return (
+                <tr key={r.id}>
+                  <td><strong>{r.user_name}</strong></td>
+                  <td>{r.prize_name}</td>
+                  <td>{r.cost_points}</td>
+                  <td><span className={`deadline-badge ${meta.cls}`}>{meta.label}</span></td>
+                  <td style={{ fontSize: 12, color: 'var(--muted)' }}>{ilDateTime(r.created_at, 'he-IL')}</td>
+                  <td>
+                    <select
+                      value={r.status || 'pending'}
+                      onChange={e => setRedemptionStatus(r, e.target.value)}
+                      style={inputStyle(120)}
+                    >
+                      {REDEMPTION_STATUSES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              );
+            })}
+            {redemptions.length === 0 && (
+              <tr><td colSpan={6} style={{ color: 'var(--muted)', textAlign: 'center', padding: 24 }}>אין מימושים עדיין.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────── קרבות (ראש בראש) ─────────────── */
+const EMPTY_BATTLE = { title: '', subject_a_label: '', subject_b_label: '', subject_a_image: '', subject_b_image: '', closes_at: '' };
+
+function BattlesTab() {
+  const [battles, setBattles] = useState([]);
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+  const [draft, setDraft] = useState(EMPTY_BATTLE);
+  const [criteria, setCriteria] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
+
+  const load = () => {
+    api.get('/battles')
+      .then(r => {
+        const data = r.data;
+        setBattles(Array.isArray(data) ? data : (data?.battles || data?.items || []));
+      })
+      .catch(e => setErr(errMsg(e)));
+  };
+  useEffect(load, []);
+
+  const toggleCriterion = (key) =>
+    setCriteria(list => list.includes(key) ? list.filter(k => k !== key) : [...list, key]);
+
+  const create = async () => {
+    if (!draft.title.trim() || !draft.subject_a_label.trim() || !draft.subject_b_label.trim()) {
+      setErr('יש להזין כותרת ושני מתמודדים');
+      return;
+    }
+    if (!criteria.length) { setErr('יש לבחור לפחות קריטריון אחד'); return; }
+    setBusy(true); setErr(''); setOk('');
+    try {
+      const payload = {
+        title: draft.title.trim(),
+        subject_a_label: draft.subject_a_label.trim(),
+        subject_b_label: draft.subject_b_label.trim(),
+        criteria
+      };
+      if (draft.subject_a_image.trim()) payload.subject_a_image = draft.subject_a_image.trim();
+      if (draft.subject_b_image.trim()) payload.subject_b_image = draft.subject_b_image.trim();
+      if (draft.closes_at) payload.closes_at = new Date(draft.closes_at).toISOString();
+      await api.post('/battles', payload);
+      setOk(`הקרב "${payload.title}" נוצר`);
+      setDraft(EMPTY_BATTLE);
+      setCriteria([]);
+      load();
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+  };
+
+  const closeBattle = async (battle) => {
+    if (!confirm(`לסגור את הקרב "${battle.title}" ולחשב את המנצח לפי רוב הקולות?`)) return;
+    setErr(''); setOk('');
+    try {
+      const { data } = await api.patch(`/battles/${battle.id}`, { status: 'closed' });
+      const winner = data?.winner ?? data?.battle?.winner;
+      setOk(`הקרב "${battle.title}" נסגר${winner ? ` — המנצח: ${winnerLabel(battle, winner)}` : ''}`);
+      load();
+    } catch (e) { setErr(errMsg(e)); }
+  };
+
+  const removeBattle = async (battle) => {
+    if (!confirm(`למחוק את הקרב "${battle.title}" כולל כל ההצבעות?`)) return;
+    setErr(''); setOk('');
+    try {
+      await api.delete(`/battles/${battle.id}`);
+      setOk(`הקרב "${battle.title}" נמחק`);
+      load();
+    } catch (e) { setErr(errMsg(e)); }
+  };
+
+  const syncProducts = async () => {
+    setSyncBusy(true); setErr(''); setOk('');
+    try {
+      const { data } = await api.post('/products/sync');
+      setOk(`סנכרון הקטלוג הושלם — ${data?.synced ?? 0} מוצרים סונכרנו`);
+    } catch (e) { setErr(errMsg(e)); } finally { setSyncBusy(false); }
+  };
+
+  // קריאה גמישה של סיכומי ההצבעות (מערך או אובייקט לפי קריטריון)
+  const talliesOf = (battle) => {
+    const t = battle.tallies || battle.results || {};
+    const rows = Array.isArray(t)
+      ? t.map(x => ({ criterion: x.criterion || x.key, a: x.a ?? x.votes_a ?? x.a_votes ?? 0, b: x.b ?? x.votes_b ?? x.b_votes ?? 0 }))
+      : Object.entries(t).map(([criterion, v]) => ({
+          criterion,
+          a: v?.a ?? v?.votes_a ?? v?.a_votes ?? 0,
+          b: v?.b ?? v?.votes_b ?? v?.b_votes ?? 0
+        }));
+    return rows.filter(row => row.criterion);
+  };
+
+  const winnerLabel = (battle, winner) => {
+    if (winner === 'a') return battle.subject_a_label;
+    if (winner === 'b') return battle.subject_b_label;
+    if (winner === 'tie' || winner === 'draw') return 'תיקו';
+    return winner || '';
+  };
+
+  return (
+    <div>
+      {err && <div className="alert alert-error">{err}</div>}
+      {ok  && <div className="alert alert-success">{ok}</div>}
+
+      <ActionCard
+        title="סנכרון קטלוג מוצרים"
+        desc="מושך את קטלוג המוצרים העדכני מה-API של סיאץ׳ אל טבלת המוצרים המקומית. המוצרים משמשים לדירוג רמה 2 ולקרבות."
+        btnLabel="סנכרן קטלוג עכשיו"
+        loading={syncBusy}
+        onClick={syncProducts}
+        variant="gold"
+      />
+
+      <div style={{ background: 'var(--paper-pure)', border: '1px solid var(--line)', borderRadius: 6, padding: 24, marginBottom: 16 }}>
+        <h3 style={{ marginTop: 0, fontFamily: 'var(--font-display)' }}>קרב חדש</h3>
+        <div className="admin-form-grid">
+          <div className="field" style={{ gridColumn: '1 / -1' }}>
+            <label>כותרת</label>
+            <input value={draft.title} onChange={e => setDraft(s => ({ ...s, title: e.target.value }))} placeholder="לדוגמה: תכלת מול וודינג קייק" />
+          </div>
+          <div className="field">
+            <label>מתמודד א׳</label>
+            <input value={draft.subject_a_label} onChange={e => setDraft(s => ({ ...s, subject_a_label: e.target.value }))} />
+          </div>
+          <div className="field">
+            <label>מתמודד ב׳</label>
+            <input value={draft.subject_b_label} onChange={e => setDraft(s => ({ ...s, subject_b_label: e.target.value }))} />
+          </div>
+          <div className="field">
+            <label>תמונת מתמודד א׳ (אופציונלי)</label>
+            <input dir="ltr" value={draft.subject_a_image} onChange={e => setDraft(s => ({ ...s, subject_a_image: e.target.value }))} placeholder="https://..." />
+          </div>
+          <div className="field">
+            <label>תמונת מתמודד ב׳ (אופציונלי)</label>
+            <input dir="ltr" value={draft.subject_b_image} onChange={e => setDraft(s => ({ ...s, subject_b_image: e.target.value }))} placeholder="https://..." />
+          </div>
+          <div className="field">
+            <label>נסגר בתאריך (אופציונלי)</label>
+            <input type="datetime-local" value={draft.closes_at} onChange={e => setDraft(s => ({ ...s, closes_at: e.target.value }))} />
+          </div>
+        </div>
+        <div className="field">
+          <label>קריטריונים להצבעה</label>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 6 }}>
+            {PRODUCT_CRITERIA.map(c => (
+              <label key={c.key} style={{ display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                <input type="checkbox" checked={criteria.includes(c.key)} onChange={() => toggleCriterion(c.key)} />
+                {c.label_he}
+              </label>
+            ))}
+          </div>
+        </div>
+        <button className="btn btn-pitch" onClick={create} disabled={busy} style={{ marginTop: 12 }}>
+          {busy ? 'יוצר...' : 'צור קרב'}
+        </button>
+      </div>
+
+      <div style={{ display: 'grid', gap: 16 }}>
+        {battles.map(battle => {
+          const rows = talliesOf(battle);
+          const closed = battle.status === 'closed';
+          const winner = battle.winner ?? battle.overall_winner;
+          return (
+            <div key={battle.id} style={{ background: 'var(--paper-pure)', border: '1px solid var(--line)', borderRadius: 6, padding: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontFamily: 'var(--font-display)' }}>{battle.title}</h3>
+                  <div style={{ color: 'var(--muted)', fontSize: 13, marginTop: 4 }}>
+                    {battle.subject_a_label} מול {battle.subject_b_label}
+                    {battle.closes_at && <span> · נסגר: {ilDateTime(battle.closes_at, 'he-IL')}</span>}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {closed
+                    ? <span className="deadline-badge ok">סגור{winner ? ` · המנצח: ${winnerLabel(battle, winner)}` : ''}</span>
+                    : <span className="deadline-badge">פעיל</span>}
+                  {!closed && (
+                    <button className="btn btn-sm btn-pitch" onClick={() => closeBattle(battle)}>סגור וחשב מנצח</button>
+                  )}
+                  <button className="btn btn-sm" style={{ background: 'var(--crimson)' }} onClick={() => removeBattle(battle)}>מחק</button>
+                </div>
+              </div>
+              {rows.length > 0 && (
+                <div className="table-wrap" style={{ marginTop: 14 }}>
+                  <table className="leaderboard-table">
+                    <thead>
+                      <tr>
+                        <th>קריטריון</th>
+                        <th>{battle.subject_a_label}</th>
+                        <th>{battle.subject_b_label}</th>
+                        <th>מוביל</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(row => (
+                        <tr key={row.criterion}>
+                          <td>{criterionLabel(row.criterion, 'he')}</td>
+                          <td style={{ fontWeight: row.a > row.b ? 700 : 400 }}>{row.a}</td>
+                          <td style={{ fontWeight: row.b > row.a ? 700 : 400 }}>{row.b}</td>
+                          <td>
+                            {row.a === row.b
+                              ? <span style={{ color: 'var(--muted)' }}>תיקו</span>
+                              : <strong>{row.a > row.b ? battle.subject_a_label : battle.subject_b_label}</strong>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {rows.length === 0 && (
+                <div style={{ color: 'var(--muted)', fontSize: 13, marginTop: 10 }}>אין הצבעות עדיין.</div>
+              )}
+            </div>
+          );
+        })}
+        {battles.length === 0 && (
+          <p style={{ textAlign: 'center', color: 'var(--muted)', padding: 40 }}>אין קרבות עדיין — צור קרב למעלה.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────── סקירה ─────────────── */
+function OverviewTab() {
+  const [stats, setStats] = useState(null);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    api.get('/admin/overview')
+      .then(r => setStats(r.data))
+      .catch(e => setErr(errMsg(e)));
+  }, []);
+
+  if (err) return <div className="alert alert-error">{err}</div>;
+  if (!stats) return <div className="loading-page"><div className="spinner" /></div>;
+
+  // קריאה הגנתית — השרת עשוי להחזיר שמות שדות ישנים (predictions/matches) או חדשים (ratings/batches)
+  return (
+    <div className="stats-grid">
+      <div className="stat-card">
+        <div className="label">משתמשים</div>
+        <div className="value">{stats.users}</div>
+      </div>
+      <div className="stat-card">
+        <div className="label">דירוגים</div>
+        <div className="value">{stats.ratings ?? stats.predictions}</div>
+      </div>
+      <div className="stat-card">
+        <div className="label">אצוות</div>
+        <div className="value">{stats.batches ?? stats.matches}</div>
+      </div>
+      <div className="stat-card">
+        <div className="label">אצוות שהסתיימו</div>
+        <div className="value">{stats.finished}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────── משתמשים ─────────────── */
+function UsersTab() {
+  const { user: currentUser } = useAuth();
+  const isFullAdmin = !!currentUser?.isAdmin;
+  const [users, setUsers] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(null);
+  const [importFile, setImportFile] = useState(null);
+  const [importMode, setImportMode] = useState('replace_existing');
+  const [importResult, setImportResult] = useState(null);
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [demoResult, setDemoResult] = useState(null);
+  const [editingUser, setEditingUser] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [createDraft, setCreateDraft] = useState({ name: '', email: '', phone_number: '', department: '', password: '', role: 'user' });
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createNotice, setCreateNotice] = useState('');
+  const [editBusy, setEditBusy] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [editNotice, setEditNotice] = useState('');
+  const [resetNotice, setResetNotice] = useState('');
+
+  const load = () => {
+    setErr('');
+    Promise.all([
+      api.get('/admin/users'),
+      api.get('/admin/departments')
+    ])
+      .then(([usersRes, departmentsRes]) => {
+        setUsers(usersRes.data);
+        setDepartments(departmentsRes.data.departments || []);
+      })
+      .catch(e => setErr(errMsg(e)));
+  };
+
+  useEffect(load, []);
+
+  const openEdit = (user) => {
+    setErr('');
+    setEditNotice('');
+    setResetNotice('');
+    setEditingUser(user);
+    setEditDraft({
+      name: user.name || '',
+      email: user.email || '',
+      phone_number: user.phone_number || '',
+      department: user.department || '',
+      can_guess_groups: !!user.can_guess_groups,
+      publish_prediction: !!user.publish_prediction,
+      gender: ['male', 'female', 'irrelevant', 'random'].includes(user.gender) ? user.gender : 'random',
+      role: user.is_admin ? 'admin' : (user.role || 'user')
+    });
+  };
+
+  const closeEdit = () => {
+    setEditingUser(null);
+    setEditDraft(null);
+    setEditBusy(false);
+    setResetBusy(false);
+    setEditNotice('');
+    setResetNotice('');
+  };
+
+  const openCreate = () => {
+    setErr('');
+    setCreateNotice('');
+    setCreateDraft({ name: '', email: '', phone_number: '', department: '', password: '', role: 'user' });
+    setCreatingUser(true);
+  };
+
+  const closeCreate = () => {
+    setCreatingUser(false);
+    setCreateBusy(false);
+    setCreateNotice('');
+  };
+
+  const createUser = async () => {
+    setCreateBusy(true);
+    setErr('');
+    setCreateNotice('');
+    try {
+      const { data } = await api.post('/admin/users', createDraft);
+      setCreateNotice(`משתמש נוצר. סיסמה: ${data.password}`);
+      load();
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setCreateBusy(false);
+    }
+  };
+
+  const remove = async (id, name) => {
+    if (!confirm(`למחוק את ${name}? פעולה זו אינה הפיכה.`)) return;
+    setBusy(true);
+    try {
+      await api.delete(`/admin/users/${id}`);
+      load();
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveUser = async () => {
+    if (!editingUser || !editDraft) return;
+    setEditBusy(true);
+    setErr('');
+    setEditNotice('');
+    setResetNotice('');
+    try {
+      const payload = {
+        name: editDraft.name,
+        email: editDraft.email,
+        phone_number: editDraft.phone_number,
+        department: editDraft.department,
+        can_guess_groups: editDraft.can_guess_groups,
+        publish_prediction: editDraft.publish_prediction,
+        gender: editDraft.gender
+      };
+      if (isFullAdmin) payload.role = editDraft.role;
+      const { data } = await api.patch(`/admin/users/${editingUser.id}`, payload);
+      setEditNotice('הנתונים נשמרו בהצלחה');
+      if (data?.user) {
+        setEditingUser(data.user);
+        setEditDraft({
+          name: data.user.name || '',
+          email: data.user.email || '',
+          phone_number: data.user.phone_number || '',
+          department: data.user.department || '',
+          can_guess_groups: !!data.user.can_guess_groups,
+          publish_prediction: !!data.user.publish_prediction,
+          gender: ['male', 'female', 'irrelevant', 'random'].includes(data.user.gender) ? data.user.gender : 'random',
+          role: data.user.is_admin ? 'admin' : (data.user.role || 'user')
+        });
+      }
+      load();
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
+  const resetPassword = async () => {
+    if (!editingUser) return;
+    if (!confirm(`לאפס סיסמה עבור ${editingUser.name}?`)) return;
+    setResetBusy(true);
+    setErr('');
+    setResetNotice('');
+    try {
+      const { data } = await api.post(`/admin/users/${editingUser.id}/reset-password`);
+      setResetNotice(`הסיסמה אופסה: ${data.password}`);
+      load();
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setResetBusy(false);
+    }
+  };
+
+  const download = async (format) => {
+    setExporting(format);
+    setErr('');
+    setImportResult(null);
+    try {
+      const { data } = await api.get(`/admin/users/export?format=${format}`, { responseType: 'blob' });
+      const blob = new Blob([data], {
+        type: format === 'csv'
+          ? 'text/csv;charset=utf-8'
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `users.${format === 'csv' ? 'csv' : 'xlsx'}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const importUsers = async () => {
+    if (!importFile) {
+      setErr('יש לבחור קובץ לייבוא');
+      return;
+    }
+    const confirmText = importMode === 'replace_all'
+      ? 'האם לנקות את כל המשתמשים הקיימים שאינם מנהלים, ואז לייבא רק את מה שיש בקובץ?'
+      : 'האם לייבא את הקובץ ולעדכן משתמשים קיימים לפי אימייל?';
+    if (!confirm(confirmText)) return;
+
+    setImporting(true);
+    setErr('');
+    setImportResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', importFile);
+      formData.append('import_mode', importMode);
+      const { data } = await api.post('/admin/users/import', formData);
+      setImportResult(data);
+      setImportFile(null);
+      load();
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const downloadTemplate = () => {
+    const csv = [
+      'שם מלא,email (username),password,phone number,מחלקה',
+      'משתמש בדיקה 01,demo01@company.local,,050-555-1001,שיווק'
+    ].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'users-import-template.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const createDemoUsers = async () => {
+    if (!confirm('ליצור/לעדכן 10 משתמשי דמו עם כל הדירוגים?')) return;
+    setDemoBusy(true);
+    setErr('');
+    setDemoResult(null);
+    try {
+      const { data } = await api.post('/admin/users/demo');
+      setDemoResult(data);
+      load();
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setDemoBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      {err && <div className="alert alert-error">{err}</div>}
+      {importResult && (
+        <div className="alert alert-success">
+          ייבוא הושלם: {importResult.created} נוצרו, {importResult.updated} עודכנו, {importResult.skipped} דולגו.
+          {importResult.import_mode === 'replace_all' && (
+            <div style={{ marginTop: 8 }}>
+              נוקו לפני הייבוא {importResult.cleared} משתמשים קיימים שאינם מנהלים.
+            </div>
+          )}
+          {importResult.generated?.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <strong>סיסמאות שנוצרו אוטומטית:</strong>
+              <div style={{ marginTop: 8, maxHeight: 220, overflow: 'auto', background: 'rgba(255,255,255,0.5)', padding: 12, borderRadius: 4 }}>
+                {importResult.generated.map(item => (
+                  <div key={`${item.email}-${item.password}`} style={{ marginBottom: 8 }}>
+                    <div>{item.name} · {item.email} · {item.department || '—'}</div>
+                    <div style={{ fontFamily: 'monospace' }}>{item.password}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {demoResult && (
+        <div className="alert alert-success">
+          נוצרו/עודכנו {demoResult.users} משתמשי דמו ו-{demoResult.predictions} דירוגים.
+          {demoResult.generated?.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <strong>פרטי כניסה לדמו:</strong>
+              <div style={{ marginTop: 8, maxHeight: 220, overflow: 'auto', background: 'rgba(255,255,255,0.5)', padding: 12, borderRadius: 4 }}>
+                {demoResult.generated.map(item => (
+                  <div key={item.email} style={{ marginBottom: 8 }}>
+                    <div>{item.name} · {item.email} · {item.department || '—'}</div>
+                    <div style={{ fontFamily: 'monospace' }}>
+                      {item.password} · {item.phone_number || '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
+        <button className="btn btn-sm btn-gold" onClick={openCreate}>
+          הוסף משתמש
+        </button>
+        <button className="btn btn-sm btn-gold" onClick={() => download('csv')} disabled={exporting !== null}>
+          {exporting === 'csv' ? 'מייצא...' : 'ייצוא CSV'}
+        </button>
+        <button className="btn btn-sm btn-outline" onClick={() => download('xlsx')} disabled={exporting !== null}>
+          {exporting === 'xlsx' ? 'מייצא...' : 'ייצוא XLSX'}
+        </button>
+        <button className="btn btn-sm btn-outline" onClick={downloadTemplate}>
+          הורד תבנית
+        </button>
+        <label className="btn btn-sm btn-pitch" style={{ overflow: 'hidden', position: 'relative' }}>
+          <input
+            type="file"
+            accept=".csv,.xls,.xlsx"
+            onChange={e => setImportFile(e.target.files?.[0] || null)}
+            style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
+          />
+          {importFile ? `קובץ: ${importFile.name}` : 'בחר קובץ לייבוא'}
+        </label>
+        <select
+          value={importMode}
+          onChange={e => setImportMode(e.target.value)}
+          style={{ minWidth: 220 }}
+        >
+          <option value="replace_existing">ייבוא: החלף קיימים / הוסף חדשים</option>
+          <option value="replace_all">ייבוא: נקה הכל והעלה רק מהקובץ</option>
+        </select>
+        <button className="btn btn-sm btn-pitch" onClick={importUsers} disabled={importing || !importFile}>
+          {importing ? 'מייבא...' : 'ייבוא משתמשים'}
+        </button>
+        <button className="btn btn-sm btn-gold" onClick={createDemoUsers} disabled={demoBusy}>
+          {demoBusy ? 'יוצר...' : 'צור 10 משתמשי דמו'}
+        </button>
+      </div>
+      <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: -6, marginBottom: 16 }}>
+        ביצוא, עמודת הסיסמה נשארת ריקה כי המערכת שומרת רק גיבוב סיסמה. לפני הייבוא בחר האם לעדכן קיימים או לנקות את כל המשתמשים שאינם מנהלים ולהעלות רק את תוכן הקובץ.
+      </p>
+      <div style={{
+        background: 'var(--paper-pure)',
+        border: '1px solid var(--line)',
+        borderRadius: 6,
+        overflow: 'hidden'
+      }}>
+        <table className="leaderboard-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>שם</th>
+              <th>אימייל</th>
+              <th>טלפון</th>
+              <th>מחלקה</th>
+              <th>דירוגים</th>
+              <th>נרשם בתאריך</th>
+              <th>תפקיד</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map(u => (
+              <tr key={u.id}>
+                <td>{u.id}</td>
+                <td><strong>{u.is_sim && <span title="בוט סימולציה">🤖 </span>}{u.name}</strong></td>
+                <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{u.email}</td>
+                <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{u.phone_number || '—'}</td>
+                <td style={{ fontSize: 13 }}>{u.department || '—'}</td>
+                <td>{u.num_predictions}</td>
+                <td style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  {ilDate(u.created_at, 'he-IL')}
+                </td>
+                <td>
+                  {(u.role === 'admin' || u.is_admin)
+                    ? <span className="deadline-badge ok">מנהל מערכת</span>
+                    : u.role === 'manager'
+                      ? <span className="deadline-badge">מנהל-משנה</span>
+                      : <span style={{ color: 'var(--muted)' }}>משתמש</span>
+                  }
+                </td>
+                <td>
+                  <button
+                    className="btn btn-sm btn-outline"
+                    style={{ marginInlineEnd: 8 }}
+                    onClick={() => openEdit(u)}
+                  >ערוך</button>
+                  {!(u.role === 'admin' || u.is_admin) && (
+                    <button
+                      className="btn btn-sm"
+                      style={{ background: 'var(--crimson)' }}
+                      onClick={() => remove(u.id, u.name)}
+                      disabled={busy}
+                    >מחק</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {users.length === 0 && (
+        <p style={{ textAlign: 'center', color: 'var(--muted)', padding: 40 }}>
+          אין משתמשים רשומים עדיין
+        </p>
+      )}
+
+      {creatingUser && (
+        <div className="admin-modal-backdrop">
+          <div className="admin-modal">
+            <div className="admin-modal-head">
+              <div>
+                <h3>הוספת משתמש חדש</h3>
+                <div style={{ color: 'var(--muted)', fontSize: 13 }}>
+                  אם לא תוזן סיסמה, תיווצר סיסמה אוטומטית.
+                </div>
+              </div>
+              <button className="btn btn-sm btn-outline" onClick={closeCreate}>סגור</button>
+            </div>
+            {createNotice && <div className="alert alert-success" style={{ marginTop: 16 }}>{createNotice}</div>}
+            <div className="admin-form-grid">
+              <div className="field">
+                <label>שם מלא</label>
+                <input value={createDraft.name} onChange={e => setCreateDraft(s => ({ ...s, name: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label>אימייל</label>
+                <input type="email" value={createDraft.email} onChange={e => setCreateDraft(s => ({ ...s, email: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label>טלפון</label>
+                <input value={createDraft.phone_number} onChange={e => setCreateDraft(s => ({ ...s, phone_number: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label>מחלקה</label>
+                <input list="department-options" value={createDraft.department} onChange={e => setCreateDraft(s => ({ ...s, department: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label>סיסמה</label>
+                <input value={createDraft.password} onChange={e => setCreateDraft(s => ({ ...s, password: e.target.value }))} placeholder="ריק = יצירה אוטומטית" />
+              </div>
+              {isFullAdmin && (
+                <div className="field">
+                  <label>תפקיד</label>
+                  <select value={createDraft.role} onChange={e => setCreateDraft(s => ({ ...s, role: e.target.value }))}>
+                    <option value="user">משתמש</option>
+                    <option value="manager">מנהל-משנה</option>
+                    <option value="admin">מנהל מערכת</option>
+                  </select>
+                </div>
+              )}
+            </div>
+            <button className="btn btn-pitch" onClick={createUser} disabled={createBusy}>
+              {createBusy ? 'יוצר...' : 'צור משתמש'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {editingUser && editDraft && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(11, 18, 32, 0.55)',
+          display: 'grid',
+          placeItems: 'center',
+          padding: 16,
+          zIndex: 50
+        }}>
+          <div style={{
+            width: 'min(720px, 100%)',
+            maxHeight: '90vh',
+            overflow: 'auto',
+            background: 'var(--paper-pure)',
+            borderRadius: 12,
+            border: '1px solid var(--line)',
+            boxShadow: '0 24px 60px rgba(0,0,0,0.28)',
+            padding: 24
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'start' }}>
+              <div>
+                <h3 style={{ marginTop: 0, marginBottom: 6, fontFamily: 'var(--font-display)' }}>
+                  עריכת משתמש
+                </h3>
+                <div style={{ color: 'var(--muted)', fontSize: 13 }}>
+                  {editingUser.name} · {editingUser.email}
+                </div>
+              </div>
+              <button className="btn btn-sm btn-outline" onClick={closeEdit}>סגור</button>
+            </div>
+
+            {editNotice && <div className="alert alert-success" style={{ marginTop: 16 }}>{editNotice}</div>}
+            {resetNotice && (
+              <div className="alert alert-success" style={{ marginTop: 12, wordBreak: 'break-all' }}>
+                {resetNotice}
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
+              <div className="field">
+                <label>שם מלא</label>
+                <input
+                  type="text"
+                  value={editDraft.name}
+                  onChange={e => setEditDraft(s => ({ ...s, name: e.target.value }))}
+                />
+              </div>
+              <div className="field">
+                <label>אימייל</label>
+                <input
+                  type="email"
+                  value={editDraft.email}
+                  onChange={e => setEditDraft(s => ({ ...s, email: e.target.value }))}
+                />
+              </div>
+              <div className="field">
+                <label>טלפון</label>
+                <input
+                  type="text"
+                  value={editDraft.phone_number}
+                  onChange={e => setEditDraft(s => ({ ...s, phone_number: e.target.value }))}
+                />
+              </div>
+              <div className="field">
+                <label>מחלקה</label>
+                <input
+                  list="department-options"
+                  type="text"
+                  value={editDraft.department}
+                  onChange={e => setEditDraft(s => ({ ...s, department: e.target.value }))}
+                  placeholder="בחר/הקלד מחלקה"
+                />
+              </div>
+            </div>
+
+            <datalist id="department-options">
+              {departments.map(dep => (
+                <option key={dep} value={dep} />
+              ))}
+            </datalist>
+
+            {isFullAdmin && (
+              <div className="field" style={{ marginTop: 16 }}>
+                <label>תפקיד</label>
+                <select
+                  value={editDraft.role}
+                  onChange={e => setEditDraft(s => ({ ...s, role: e.target.value }))}
+                >
+                  <option value="user">משתמש</option>
+                  <option value="manager">מנהל-משנה (ניהול משתמשים ואצוות)</option>
+                  <option value="admin">מנהל מערכת (גישה מלאה)</option>
+                </select>
+                <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>
+                  מנהל-משנה רשאי לנהל משתמשים ולעדכן תוצאות אצוות בלבד.
+                </div>
+              </div>
+            )}
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={!!editDraft.can_guess_groups}
+                onChange={e => setEditDraft(s => ({ ...s, can_guess_groups: e.target.checked }))}
+                style={{ width: 18, height: 18 }}
+              />
+              <span>ניחוש קבוצתי (הרשאת גישה למערכת הניחוש הקבוצתי)</span>
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={!!editDraft.publish_prediction}
+                onChange={e => setEditDraft(s => ({ ...s, publish_prediction: e.target.checked }))}
+                style={{ width: 18, height: 18 }}
+              />
+              <span>פרסום תחזיות (מציג למשתמש את כפתור ההקלטה "פרסם את התחזית שלך")</span>
+            </label>
+
+            <div className="field" style={{ marginTop: 16, maxWidth: 260 }}>
+              <label>מגדר (לניסוח טקסטים בעברית)</label>
+              <select value={editDraft.gender || 'random'} onChange={e => setEditDraft(s => ({ ...s, gender: e.target.value }))}>
+                <option value="random">אקראי</option>
+                <option value="male">זכר</option>
+                <option value="female">נקבה</option>
+                <option value="irrelevant">לא רלוונטי</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 20 }}>
+              <button className="btn btn-pitch" onClick={saveUser} disabled={editBusy}>
+                {editBusy ? 'שומר...' : 'שמור שינויים'}
+              </button>
+              <button className="btn btn-outline" onClick={resetPassword} disabled={resetBusy}>
+                {resetBusy ? 'מאפס...' : 'איפוס סיסמה'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────── מחלקות ─────────────── */
+function DepartmentsTab() {
+  const [departments, setDepartments] = useState([]);
+  const [draft, setDraft] = useState([]);
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    setErr('');
+    setOk('');
+    api.get('/admin/departments')
+      .then(r => {
+        const list = r.data.departments || [];
+        setDepartments(list);
+        setDraft(list.length ? list : ['']);
+      })
+      .catch(e => setErr(errMsg(e)));
+  };
+
+  useEffect(load, []);
+
+  const update = (index, value) => {
+    setDraft(items => items.map((item, i) => (i === index ? value : item)));
+  };
+
+  const addRow = () => setDraft(items => [...items, '']);
+  const removeRow = (index) => setDraft(items => items.filter((_, i) => i !== index));
+
+  const save = async () => {
+    const clean = draft.map(item => item.trim()).filter(Boolean);
+    if (!clean.length) {
+      setErr('יש להזין לפחות מחלקה אחת');
+      return;
+    }
+    setBusy(true);
+    setErr('');
+    setOk('');
+    try {
+      const { data } = await api.post('/admin/departments', { departments: clean });
+      const list = data.departments || clean;
+      setDepartments(list);
+      setDraft(list.length ? list : ['']);
+      setOk('המחלקות נשמרו בהצלחה');
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: 760 }}>
+      {err && <div className="alert alert-error">{err}</div>}
+      {ok && <div className="alert alert-success">{ok}</div>}
+
+      <div style={{
+        background: 'var(--paper-pure)',
+        border: '1px solid var(--line)',
+        borderRadius: 6,
+        padding: 24
+      }}>
+        <h3 style={{
+          marginTop: 0,
+          marginBottom: 8,
+          fontFamily: 'var(--font-display)',
+          fontSize: 22,
+          letterSpacing: 1,
+          color: 'var(--ink)'
+        }}>ניהול מחלקות</h3>
+        <p style={{ marginTop: 0, color: 'var(--muted)', fontSize: 14, lineHeight: 1.6 }}>
+          הרשימה הזו משמשת את טופס המשתמשים, ייבוא קבצים ועריכת פרטי משתמשים.
+        </p>
+
+        <div style={{ display: 'grid', gap: 12, marginTop: 16 }}>
+          {draft.map((value, index) => (
+            <div key={index} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                type="text"
+                value={value}
+                onChange={e => update(index, e.target.value)}
+                placeholder={`מחלקה ${index + 1}`}
+              />
+              <button
+                className="btn btn-sm btn-outline"
+                onClick={() => removeRow(index)}
+                disabled={draft.length === 1}
+              >
+                מחק
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 16 }}>
+          <button className="btn btn-sm btn-outline" onClick={addRow}>הוסף מחלקה</button>
+          <button className="btn btn-gold" onClick={save} disabled={busy}>
+            {busy ? 'שומר...' : 'שמור מחלקות'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────── דירוגים חסרים (ייצוא לתזכורת) ─────────────── */
+function MissingGuessesTab() {
+  const [exporting, setExporting] = useState(null);
+  const [waBusy, setWaBusy] = useState(false);
+  const [waActBusy, setWaActBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  // תיבה שנייה: לפי מחלקה + טווח כמות דירוגים שהוזנו
+  const [departments, setDepartments] = useState([]);
+  const [actDept, setActDept] = useState('all');
+  const [actMin, setActMin] = useState('');
+  const [actMax, setActMax] = useState('');
+  const [actPct, setActPct] = useState('');
+  const [exportingAct, setExportingAct] = useState(null);
+
+  useEffect(() => {
+    api.get('/admin/departments')
+      .then((res) => setDepartments(res.data.departments || []))
+      .catch(() => setDepartments([]));
+  }, []);
+
+  const downloadBlob = (data, format, baseName) => {
+    const blob = new Blob([data], {
+      type: format === 'csv'
+        ? 'text/csv;charset=utf-8'
+        : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${baseName}.${format === 'csv' ? 'csv' : 'xlsx'}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportMissing = async (format) => {
+    setExporting(format);
+    setErr('');
+    try {
+      const { data } = await api.get(
+        `/admin/users/export-missing?format=${format}`,
+        { responseType: 'blob' }
+      );
+      downloadBlob(data, format, 'missing-ratings');
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  // יוצר קובץ XLS ציבורי לכל תיבת ייצוא וקופץ ל-TmpSender לשליחת וואטסאפ (תבנית mon2026_high_scores)
+  const sendWhatsapp = async (linkPath, setBusy) => {
+    setBusy(true); setErr('');
+    try {
+      const { data } = await api.post(linkPath);
+      const url = 'https://tmpsender.seach.co.il/?xls=' + encodeURIComponent(data.url)
+        + '&template=' + encodeURIComponent('mon2026_high_scores');
+      window.open(url, '_blank');
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // פרמטרי הסינון של תיבת "לפי מחלקה וכמות ניחושים" (משותף לייצוא ולוואטסאפ)
+  const activityQuery = () => {
+    const params = new URLSearchParams({ department: actDept });
+    if (actMin !== '') params.set('min', actMin);
+    if (actMax !== '') params.set('max', actMax);
+    if (actPct !== '') params.set('min_correct_pct', actPct);
+    return params.toString();
+  };
+
+  const exportActivity = async (format) => {
+    setExportingAct(format);
+    setErr('');
+    try {
+      const { data } = await api.get(
+        `/admin/users/export-by-activity?format=${format}&${activityQuery()}`,
+        { responseType: 'blob' }
+      );
+      downloadBlob(data, format, `users-by-guesses`);
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setExportingAct(null);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      {err && <div className="alert alert-error">{err}</div>}
+
+      <SettingsCard title="ייצוא: טרם דירגו אצוות פעילות">
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
+          קובץ Excel עם שם וטלפון של כל המשתמשים שטרם דירגו את האצוות הפעילות (לתזכורת).
+        </p>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-sm btn-gold"
+            onClick={() => exportMissing('xlsx')}
+            disabled={exporting !== null}
+          >
+            {exporting === 'xlsx' ? 'מייצא...' : 'ייצוא XLSX'}
+          </button>
+          <button
+            className="btn btn-sm btn-outline"
+            onClick={() => exportMissing('csv')}
+            disabled={exporting !== null}
+          >
+            {exporting === 'csv' ? 'מייצא...' : 'ייצוא CSV'}
+          </button>
+          <button
+            className="btn btn-sm"
+            style={{ background: '#25D366', color: '#fff', borderColor: '#25D366' }}
+            onClick={() => sendWhatsapp('/admin/users/export-missing-link', setWaBusy)}
+            disabled={waBusy}
+          >
+            {waBusy ? 'פותח...' : 'שלח ב-WhatsApp'}
+          </button>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="ייצוא: לפי מחלקה וכמות דירוגים">
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
+          קובץ Excel (כולל נקודות ומיקום) של משתמשים ממחלקה נבחרת, לפי כמות הדירוגים
+          שהוזנו (יותר מ-X, פחות מ-Y) ולפי אחוז הפגיעות מבין האצוות שהסתיימו
+          (יותר מ-X%). השאר ריק כדי לא להגביל.
+        </p>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+          <div className="field" style={{ minWidth: 180 }}>
+            <label>מחלקה</label>
+            <select value={actDept} onChange={(e) => setActDept(e.target.value)}>
+              <option value="all">כל המחלקות</option>
+              {departments.map((dep) => (
+                <option key={dep} value={dep}>{dep}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field" style={{ maxWidth: 140 }}>
+            <label>יותר מ- (X)</label>
+            <input
+              type="number"
+              min={0}
+              value={actMin}
+              placeholder="ללא"
+              onChange={(e) => setActMin(e.target.value)}
+            />
+          </div>
+          <div className="field" style={{ maxWidth: 140 }}>
+            <label>פחות מ- (Y)</label>
+            <input
+              type="number"
+              min={0}
+              value={actMax}
+              placeholder="ללא"
+              onChange={(e) => setActMax(e.target.value)}
+            />
+          </div>
+          <div className="field" style={{ maxWidth: 170 }}>
+            <label>יותר מ- (X%) נכונים</label>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              value={actPct}
+              placeholder="ללא"
+              onChange={(e) => setActPct(e.target.value)}
+            />
+          </div>
+          <button
+            className="btn btn-sm btn-gold"
+            onClick={() => exportActivity('xlsx')}
+            disabled={exportingAct !== null}
+          >
+            {exportingAct === 'xlsx' ? 'מייצא...' : 'ייצוא XLSX'}
+          </button>
+          <button
+            className="btn btn-sm btn-outline"
+            onClick={() => exportActivity('csv')}
+            disabled={exportingAct !== null}
+          >
+            {exportingAct === 'csv' ? 'מייצא...' : 'ייצוא CSV'}
+          </button>
+          <button
+            className="btn btn-sm"
+            style={{ background: '#25D366', color: '#fff', borderColor: '#25D366' }}
+            onClick={() => sendWhatsapp(`/admin/users/export-by-activity-link?${activityQuery()}`, setWaActBusy)}
+            disabled={waActBusy}
+          >
+            {waActBusy ? 'פותח...' : 'שלח ב-WhatsApp'}
+          </button>
+        </div>
+      </SettingsCard>
+    </div>
+  );
+}
+
+/* ─────────────── הגדרות ─────────────── */
+function SettingsTab() {
+  const [settings, setSettings] = useState({});
+  const [draft, setDraft]       = useState({});
+  const [footerDocs, setFooterDocs] = useState([]);
+  const [footerDrafts, setFooterDrafts] = useState({});
+  const [specialPopups, setSpecialPopups] = useState([]);
+  const [savingDocKey, setSavingDocKey] = useState(null);
+  const [savingPopupId, setSavingPopupId] = useState(null);
+  const [deletingPopupId, setDeletingPopupId] = useState(null);
+  const [err, setErr] = useState('');
+  const [ok, setOk]   = useState('');
+
+  const [settingsDepartments, setSettingsDepartments] = useState([]);
+
+  useEffect(() => {
+    api.get('/admin/departments')
+      .then(r => setSettingsDepartments(r.data.departments || []))
+      .catch(() => setSettingsDepartments([]));
+    Promise.all([
+      api.get('/admin/settings'),
+      api.get('/admin/footer-docs'),
+      api.get('/admin/special-popups')
+    ])
+      .then(([settingsRes, footerRes, popupsRes]) => {
+        setSettings(settingsRes.data);
+        setDraft(settingsRes.data);
+        const docs = footerRes.data.docs || [];
+        setFooterDocs(docs);
+        setFooterDrafts(Object.fromEntries(docs.map((doc) => [doc.doc_key, {
+          label: doc.label || '',
+          file: null,
+          file_url: doc.file_url || '',
+          file_name: doc.file_name || '',
+          file_type: doc.file_type || 'pdf'
+        }])));
+        setSpecialPopups((popupsRes.data?.items || []).map((item) => ({
+          ...item,
+          image_file: null,
+          _local: false
+        })));
+      })
+      .catch(e => setErr(errMsg(e)));
+  }, []);
+
+  const upd = (k, v) => setDraft(s => ({ ...s, [k]: v }));
+
+  // מפת מחלקה→תחנה נשמרת כ-JSON בהגדרה department_stages
+  const departmentStages = (() => {
+    try { return JSON.parse(draft.department_stages || '{}') || {}; }
+    catch { return {}; }
+  })();
+  const updDepartmentStage = (dep, stage) => {
+    const next = { ...departmentStages };
+    if (stage) next[dep] = stage; else delete next[dep];
+    upd('department_stages', JSON.stringify(next));
+  };
+
+  const save = async () => {
+    setErr(''); setOk('');
+    try {
+      await api.post('/admin/settings', draft);
+      setSettings(draft);
+      setOk('ההגדרות נשמרו בהצלחה');
+    } catch (e) {
+      setErr(errMsg(e));
+    }
+  };
+
+  const saveFooterDoc = async (docKey) => {
+    const draftDoc = footerDrafts[docKey];
+    if (!draftDoc) return;
+    setSavingDocKey(docKey);
+    setErr('');
+    setOk('');
+    try {
+      const form = new FormData();
+      form.append('label', draftDoc.label);
+      if (draftDoc.file) form.append('file', draftDoc.file);
+      const { data } = await api.post(`/admin/footer-docs/${docKey}`, form);
+      const nextDoc = data.doc;
+      setFooterDocs((prev) => prev.map((item) => item.doc_key === docKey ? nextDoc : item));
+      setFooterDrafts((prev) => ({
+        ...prev,
+        [docKey]: {
+          label: nextDoc.label || '',
+          file: null,
+          file_url: nextDoc.file_url || '',
+          file_name: nextDoc.file_name || '',
+          file_type: nextDoc.file_type || 'pdf'
+        }
+      }));
+      setOk(`מסמך "${nextDoc.label}" נשמר`);
+      // רענון מיידי של הפוטר הגלובלי כדי שהקישור יפתח את הקובץ החדש
+      window.dispatchEvent(new Event('footer-docs-updated'));
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setSavingDocKey(null);
+    }
+  };
+
+  const updPopup = (id, key, value) => {
+    setSpecialPopups((items) => items.map((item) => item.id === id ? { ...item, [key]: value } : item));
+  };
+
+  const addPopup = () => {
+    const ts = Date.now();
+    setSpecialPopups((items) => [
+      ...items,
+      {
+        id: `special-popup-${ts}`,
+        title: '',
+        image_url: '',
+        image_file: null,
+        start_at: '',
+        end_at: '',
+        enabled: true,
+        sort_order: items.length * 10 + 10,
+        _local: true
+      }
+    ]);
+  };
+
+  const savePopup = async (popup) => {
+    setSavingPopupId(popup.id);
+    setErr('');
+    setOk('');
+    try {
+      const form = new FormData();
+      form.append('id', popup.id);
+      form.append('title', popup.title || '');
+      form.append('start_at', popup.start_at || '');
+      form.append('end_at', popup.end_at || '');
+      form.append('enabled', popup.enabled ? '1' : '0');
+      form.append('sort_order', String(popup.sort_order ?? 0));
+      if (popup.image_file) form.append('image', popup.image_file);
+      const { data } = await api.post('/admin/special-popups', form);
+      setSpecialPopups((items) => (data.items || []).map((item) => ({
+        ...item,
+        image_file: null,
+        _local: false
+      })));
+      setOk(`פופאפ "${data.item?.title || data.item?.id}" נשמר`);
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setSavingPopupId(null);
+    }
+  };
+
+  const deletePopup = async (popupId) => {
+    const popup = specialPopups.find((item) => item.id === popupId);
+    if (popup?._local) {
+      setSpecialPopups((items) => items.filter((item) => item.id !== popupId));
+      return;
+    }
+    setDeletingPopupId(popupId);
+    setErr('');
+    setOk('');
+    try {
+      const { data } = await api.delete(`/admin/special-popups/${popupId}`);
+      setSpecialPopups((data.items || []).map((item) => ({
+        ...item,
+        image_file: null,
+        _local: false
+      })));
+      setOk('הפופאפ נמחק');
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setDeletingPopupId(null);
+    }
+  };
+
+  const dirty = JSON.stringify(settings) !== JSON.stringify(draft);
+  const sendResultsEnabled = ['1', 'true', 'on', 'yes'].includes(String(draft.send_results_to_users || '').toLowerCase());
+  const sendActivityEnabled = draft.send_activity_report_to_manager === undefined
+    ? true
+    : ['1', 'true', 'on', 'yes'].includes(String(draft.send_activity_report_to_manager || '').toLowerCase());
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      {err && <div className="alert alert-error">{err}</div>}
+      {ok  && <div className="alert alert-success">{ok}</div>}
+
+      <SettingsCard title="מערכת שיחים (שיח-מרקט)">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={draft.coins_system_enabled === undefined ? true : ['1', 'true', 'on', 'yes'].includes(String(draft.coins_system_enabled).toLowerCase())}
+            onChange={(e) => upd('coins_system_enabled', e.target.checked ? '1' : '0')}
+          />
+          <span>הפעל מערכת שיחים</span>
+        </label>
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 8, marginBottom: 0 }}>
+          כשמכובה — כל מערכת השיחים (ניחושי שיח-מרקט, הימורים, ארנק, טבלת מצטיינים,
+          לשונית השיחים בתפריט ופאנל "ההימורים שלי" בפרופיל) תוסתר ותושבת לחלוטין באתר.
+        </p>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginTop: 12 }}>
+          <input
+            type="checkbox"
+            checked={['1', 'true', 'on', 'yes'].includes(String(draft.coins_leaderboard_enabled || '').toLowerCase())}
+            onChange={(e) => upd('coins_leaderboard_enabled', e.target.checked ? '1' : '0')}
+          />
+          <span>הצג טבלת מצטייני שיחים</span>
+        </label>
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 6, marginBottom: 0 }}>
+          ברירת מחדל: כבוי. כשמכובה — טבלת מצטייני השיחים (בדף הבית ובלשונית השיחים) מוסתרת.
+        </p>
+      </SettingsCard>
+
+      <SettingsCard title="אתר שומר שבת">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={draft.shabbat_mode === undefined ? true : ['1', 'true', 'on', 'yes'].includes(String(draft.shabbat_mode).toLowerCase())}
+            onChange={(e) => upd('shabbat_mode', e.target.checked ? '1' : '0')}
+          />
+          <span>חסום את האתר בשבת (לפי מיקום הגולש)</span>
+        </label>
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 8, marginBottom: 0 }}>
+          כשמופעל — בכניסת השבת מוצג לגולשים מסך "שבת שלום" עד צאת השבת, לפי זמני
+          הכניסה/יציאה במיקום הגולש (אזור-הזמן בדפדפן). מנהלים פטורים מהחסימה.
+        </p>
+      </SettingsCard>
+
+      <SettingsCard title="ניקוד">
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
+          ניחוש מדויק של רמת האיכות הסופית מזכה בניקוד מלא; פספוס ברמה אחת (למעלה או למטה) מזכה בניקוד חלקי.
+          לאחר שינוי, יש להריץ "חישוב מחדש" בלשונית פעולות.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <NumField label="ניחוש מדויק" value={draft.scoring_exact} onChange={v => upd('scoring_exact', v)} />
+          <NumField label="קרוב (±1 רמה)" value={draft.scoring_close} onChange={v => upd('scoring_close', v)} />
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="שיוך מחלקות לתחנות">
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
+          כל מחלקה משויכת לתחנה בשרשרת הייצור — הדירוג של עובדי המחלקה יירשם אוטומטית על התחנה הזו.
+          מחלקה ללא שיוך — העובד בוחר תחנה בעצמו בעת הדירוג.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {settingsDepartments.map((dep) => (
+            <div className="field" key={dep}>
+              <label>{dep}</label>
+              <select
+                value={departmentStages[dep] || ''}
+                onChange={e => updDepartmentStage(dep, e.target.value)}
+              >
+                <option value="">— ללא שיוך (בחירה חופשית) —</option>
+                {BATCH_STAGES.map(s => (
+                  <option key={s.key} value={s.key}>{s.emoji} {s.label_he}</option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="ניחוש קבוצתי">
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
+          גבולות מערכת הניחוש הקבוצתי. שינוי המכפיל המקסימלי ישפיע על חישובים חדשים (הרץ "חישוב מחדש" לעדכון רטרואקטיבי).
+        </p>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+          <input
+            type="checkbox"
+            checked={String(draft.site_guess_groups_enabled ?? 'false') === 'true'}
+            onChange={e => upd('site_guess_groups_enabled', e.target.checked ? 'true' : 'false')}
+          />
+          הפעל ניחוש קבוצתי ברמת האתר
+        </label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <NumField label="מקס׳ קבוצות לכל משתמש" value={draft.group_max_per_user ?? 8} onChange={v => upd('group_max_per_user', v)} />
+          <NumField label="מקס׳ חברים בקבוצה" value={draft.group_max_members ?? 5} onChange={v => upd('group_max_members', v)} />
+          <NumField label="דמי כניסה מקסימליים (נק׳)" value={draft.group_entry_cost_max ?? 5} onChange={v => upd('group_entry_cost_max', v)} />
+          <NumField label="מכפיל מקסימלי (×)" value={draft.group_multiplier_cap ?? 5} onChange={v => upd('group_multiplier_cap', v)} />
+        </div>
+        <div style={{ color: 'var(--muted)', fontSize: 13, marginTop: 8 }}>
+          כשהאפשרות כבויה, קישור הניחוש הקבוצתי מוסתר מכל המשתמשים וגם ה-API נחסם.
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="אצוות הרבעון (הימור מיוחד)">
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
+          קוד האצווה שנבחרה כאצווה המצטיינת של הרבעון — משמש ליישוב ההימור המיוחד "אצוות הרבעון".
+          השאר ריק כל עוד לא הוכרזה תוצאה.
+        </p>
+        <div className="field" style={{ maxWidth: 280 }}>
+          <label>קוד האצווה המצטיינת</label>
+          <input
+            type="text"
+            placeholder="לדוגמה: B-2026-001"
+            value={draft.real_top_batch ?? ''}
+            onChange={e => upd('real_top_batch', e.target.value)}
+          />
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="SMTP / שליחת אימיילים">
+        <div className="admin-form-grid">
+          <div className="field">
+            <label>ספק שליחה למשתמשים</label>
+            <select
+              value={draft.email_user_delivery_mode ?? 'smtp'}
+              onChange={e => upd('email_user_delivery_mode', e.target.value)}
+            >
+              <option value="smtp">SMTP של הספק (seach.co.il)</option>
+              <option value="gmail">חשבון Gmail (סיסמת אפליקציה)</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>שרת SMTP</label>
+            <input
+              type="text"
+              value={draft.smtp_server ?? ''}
+              onChange={e => upd('smtp_server', e.target.value)}
+              placeholder="smtp.inbox.co.il"
+            />
+          </div>
+          <div className="field">
+            <label>פורט SMTP</label>
+            <input
+              type="number"
+              value={draft.smtp_port ?? '587'}
+              onChange={e => upd('smtp_port', e.target.value)}
+              placeholder="587"
+            />
+          </div>
+          <div className="field">
+            <label>אבטחה</label>
+            <select
+              value={draft.smtp_security ?? 'STARTTLS'}
+              onChange={e => upd('smtp_security', e.target.value)}
+            >
+              <option value="STARTTLS">STARTTLS</option>
+              <option value="SSL">SSL</option>
+              <option value="NONE">ללא</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>משתמש/כתובת שולחת</label>
+            <input
+              type="text"
+              value={draft.smtp_user ?? ''}
+              onChange={e => upd('smtp_user', e.target.value)}
+              placeholder="mon2026@reports.seach.co.il"
+            />
+          </div>
+          <div className="field">
+            <label>סיסמת SMTP</label>
+            <input
+              type="text"
+              value={draft.smtp_password ?? ''}
+              onChange={e => upd('smtp_password', e.target.value)}
+              placeholder="********"
+            />
+          </div>
+          <div className="field">
+            <label>מנהלת שליחות</label>
+            <input
+              type="email"
+              value={draft.smtp_manager_email ?? ''}
+              onChange={e => upd('smtp_manager_email', e.target.value)}
+              placeholder="mon4all@hinbit.com"
+            />
+          </div>
+          <div className="field">
+            <label>כתובת האתר</label>
+            <input
+              type="text"
+              value={draft.site_url ?? ''}
+              onChange={e => upd('site_url', e.target.value)}
+              placeholder="https://mon2026.seach.co.il"
+            />
+          </div>
+        </div>
+        <div className="admin-form-grid" style={{ marginTop: 16 }}>
+          <div className="field">
+            <label>כתובת Gmail שולחת</label>
+            <input
+              type="email"
+              value={draft.gmail_app_user ?? ''}
+              onChange={e => upd('gmail_app_user', e.target.value)}
+              placeholder="example@gmail.com"
+            />
+          </div>
+          <div className="field">
+            <label>סיסמת אפליקציה של Gmail</label>
+            <input
+              type="text"
+              value={draft.gmail_app_password ?? ''}
+              onChange={e => upd('gmail_app_password', e.target.value)}
+              placeholder="16 תווים (App Password)"
+            />
+          </div>
+        </div>
+        <div style={{ color: 'var(--muted)', fontSize: 13, marginTop: 8 }}>
+          כשבוחרים "חשבון Gmail", הודעות למשתתפים יישלחו דרך smtp.gmail.com עם כתובת ה-Gmail וסיסמת האפליקציה
+          (יש להפעיל אימות דו-שלבי בחשבון Google וליצור "סיסמת אפליקציה"). דוח המנהלת ימשיך לצאת דרך ה-SMTP שהוגדר.
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="דוח פעילות יומי למנהלת">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={sendActivityEnabled}
+            onChange={(e) => upd('send_activity_report_to_manager', e.target.checked ? '1' : '0')}
+          />
+          <span>שלח דוח פעילות יומי למנהלת שליחות</span>
+        </label>
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 8, marginBottom: 0 }}>
+          הדוח כולל כניסות למערכת, ניחושים, שינויי ניחוש, ריביוים, לייקים והימורי שיחים. ברירת המחדל היא פעיל.
+        </p>
+        <div style={{ marginTop: 12 }}>
+          <button
+            className="btn btn-sm btn-gold"
+            onClick={async () => {
+              setErr(''); setOk('');
+              try {
+                const { data } = await api.post('/admin/activity-report/send');
+                setOk(`דוח פעילות יומי נשלח ל-${data.to} (${data.dateLabel})`);
+              } catch (e) {
+                setErr(errMsg(e));
+              }
+            }}
+          >
+            שלח דוח פעילות עכשיו
+          </button>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="שליחת תוצאות למשתמשים">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={sendResultsEnabled}
+            onChange={(e) => upd('send_results_to_users', e.target.checked ? '1' : '0')}
+          />
+          <span>שלח דוח תוצאות יומי למשתמשים</span>
+        </label>
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 8, marginBottom: 0 }}>
+          אם הפעולה פעילה, השרת ישלח דוח יומי בשעה שנקבעה לפי שעון ישראל. ברירת המחדל היא 19:00.
+        </p>
+        {sendResultsEnabled && (
+          <div className="admin-form-grid" style={{ marginTop: 16 }}>
+            <NumField
+              label="שעת שליחה (שעון ישראל)"
+              value={draft.send_results_hour ?? 19}
+              onChange={v => upd('send_results_hour', v)}
+              min={0}
+              max={23}
+            />
+            <div className="field">
+              <label>למי לשלוח</label>
+              <select
+                value={draft.send_results_audience ?? 'all'}
+                onChange={e => upd('send_results_audience', e.target.value)}
+              >
+                <option value="all">כל המשתמשים</option>
+                <option value="guessers">כל מי שיש לו ניחושים</option>
+                <option value="top10">10 המובילים</option>
+              </select>
+            </div>
+          </div>
+        )}
+        <div style={{ color: 'var(--muted)', fontSize: 13, marginTop: 8 }}>
+          אם "אתר שומר שבת" פעיל, שליחת האימיילים תיעצר בזמן שבת בישראל.
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="מסמכי פוטר">
+        <div style={{ display: 'grid', gap: 16 }}>
+          {footerDocs.filter((doc) => doc.doc_key !== 'contact').map((doc) => {
+            const docDraft = footerDrafts[doc.doc_key];
+            if (!docDraft) return null;
+            return (
+              <div key={doc.doc_key} style={{ border: '1px solid var(--line)', padding: 16, borderRadius: 6 }}>
+                <div className="admin-form-grid">
+                  <div className="field">
+                    <label>כותרת</label>
+                    <input
+                      type="text"
+                      value={docDraft.label}
+                      onChange={(e) => setFooterDrafts((s) => ({ ...s, [doc.doc_key]: { ...s[doc.doc_key], label: e.target.value } }))}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>החלפת קובץ</label>
+                    {docDraft.file_url ? (
+                      <div style={{ fontSize: 13, marginBottom: 6 }}>
+                        קובץ נוכחי:{' '}
+                        <a href={docDraft.file_url} target="_blank" rel="noreferrer" style={{ wordBreak: 'break-all' }}>
+                          {docDraft.file_url}
+                        </a>
+                        {docDraft.file_name && (
+                          <span style={{ color: 'var(--muted)' }}> ({docDraft.file_name})</span>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 13, marginBottom: 6, color: 'var(--muted)' }}>
+                        לא הוגדר קובץ לקישור זה עדיין
+                      </div>
+                    )}
+                    <input
+                      type="file"
+                      accept=".pdf,image/*"
+                      onChange={(e) => setFooterDrafts((s) => ({ ...s, [doc.doc_key]: { ...s[doc.doc_key], file: e.target.files?.[0] || null } }))}
+                    />
+                  </div>
+                </div>
+                <button className="btn btn-sm btn-gold" onClick={() => saveFooterDoc(doc.doc_key)} disabled={savingDocKey === doc.doc_key}>
+                  {savingDocKey === doc.doc_key ? 'שומר...' : 'שמור מסמך'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="פופאפים מיוחדים">
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
+          כל פופאפ פעיל יוצג פעם אחת לכל משתמש בזמן טווח התאריכים שלו. כדי להציג שוב הודעה באותו עיצוב בתאריך אחר, יוצרים פופאפ נוסף עם טווח נפרד.
+        </p>
+        <div style={{ display: 'grid', gap: 16 }}>
+          {specialPopups.map((popup) => (
+            <div key={popup.id} style={{ border: '1px solid var(--line)', padding: 16, borderRadius: 6 }}>
+              <div className="admin-form-grid">
+                <div className="field">
+                  <label>מזהה</label>
+                  <input type="text" value={popup.id} disabled />
+                </div>
+                <div className="field">
+                  <label>כותרת</label>
+                  <input type="text" value={popup.title || ''} onChange={(e) => updPopup(popup.id, 'title', e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>מיון</label>
+                  <input
+                    type="number"
+                    value={popup.sort_order ?? 0}
+                    onChange={(e) => updPopup(popup.id, 'sort_order', e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label>מתאריך</label>
+                  <input
+                    type="datetime-local"
+                    value={String(popup.start_at || '').slice(0, 16)}
+                    onChange={(e) => updPopup(popup.id, 'start_at', e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label>עד תאריך</label>
+                  <input
+                    type="datetime-local"
+                    value={String(popup.end_at || '').slice(0, 16)}
+                    onChange={(e) => updPopup(popup.id, 'end_at', e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 28 }}>
+                    <input
+                      type="checkbox"
+                      checked={!!popup.enabled}
+                      onChange={(e) => updPopup(popup.id, 'enabled', e.target.checked)}
+                    />
+                    <span>פעיל</span>
+                  </label>
+                </div>
+                <div className="field" style={{ gridColumn: '1 / -1' }}>
+                  <label>תמונה</label>
+                  {popup.image_url ? (
+                    <img src={popup.image_url} alt={popup.title || popup.id} className="schedule-admin-preview" />
+                  ) : (
+                    <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 8 }}>אין תמונה כרגע</div>
+                  )}
+                  <input type="file" accept="image/*" onChange={(e) => updPopup(popup.id, 'image_file', e.target.files?.[0] || null)} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                <button className="btn btn-sm btn-gold" onClick={() => savePopup(popup)} disabled={savingPopupId === popup.id}>
+                  {savingPopupId === popup.id ? 'שומר...' : 'שמור פופאפ'}
+                </button>
+                <button className="btn btn-sm btn-outline" onClick={() => deletePopup(popup.id)} disabled={deletingPopupId === popup.id}>
+                  {deletingPopupId === popup.id ? 'מוחק...' : 'מחק'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button className="btn btn-sm btn-outline" onClick={addPopup} style={{ marginTop: 16 }}>
+          הוסף פופאפ
+        </button>
+      </SettingsCard>
+
+      <button
+        className="btn btn-gold"
+        onClick={save}
+        disabled={!dirty}
+        style={{ marginTop: 16 }}
+      >
+        {dirty ? 'שמור שינויים' : 'אין שינויים'}
+      </button>
+    </div>
+  );
+}
+
+/* ─────────────── צור קשר ─────────────── */
+function ContactTab() {
+  const [contactMessages, setContactMessages] = useState([]);
+  const [contactActionId, setContactActionId] = useState(null);
+  const [err, setErr] = useState('');
+  const [ok, setOk]   = useState('');
+
+  const load = () => {
+    setErr('');
+    api.get('/admin/footer-docs')
+      .then((res) => setContactMessages(res.data.contacts || []))
+      .catch((e) => setErr(errMsg(e)));
+  };
+  useEffect(load, []);
+
+  const markContactHandled = async (id) => {
+    setContactActionId(id); setErr(''); setOk('');
+    try {
+      await api.post(`/admin/contact-messages/${id}/handle`);
+      setContactMessages((prev) => prev.map((item) => item.id === id ? { ...item, handled_at: new Date().toISOString() } : item));
+      setOk('הפנייה סומנה כטופלה');
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setContactActionId(null);
+    }
+  };
+
+  const deleteContact = async (id) => {
+    if (!confirm('למחוק את הפנייה?')) return;
+    setContactActionId(id); setErr(''); setOk('');
+    try {
+      await api.delete(`/admin/contact-messages/${id}`);
+      setContactMessages((prev) => prev.filter((item) => item.id !== id));
+      setOk('הפנייה נמחקה');
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setContactActionId(null);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      {err && <div className="alert alert-error">{err}</div>}
+      {ok  && <div className="alert alert-success">{ok}</div>}
+
+      <SettingsCard title="צור קשר">
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
+          פניות שנשלחו מטופס "צור קשר" באתר (שם, טלפון, טקסט ותמונה). סמן כטופל או מחק.
+        </p>
+        <div style={{ display: 'grid', gap: 12 }}>
+          {contactMessages.map((item) => (
+            <div key={item.id} style={{ border: '1px solid var(--line)', padding: 16, borderRadius: 6, background: item.handled_at ? 'rgba(45,110,62,0.08)' : 'var(--paper-pure)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                <strong>{item.name}</strong>
+                <span style={{ color: 'var(--muted)', fontSize: 13 }}>
+                  {ilDateTime(item.created_at, 'he-IL')}
+                </span>
+              </div>
+              <div style={{ color: 'var(--muted)', fontSize: 14, marginTop: 6 }}>
+                טלפון: {item.phone_number || '—'}
+                {item.user_email ? ` | משתמש: ${item.user_email}` : ''}
+                {item.handled_at ? ` | טופל` : ''}
+              </div>
+              <p style={{ marginBottom: 12 }}>{item.message}</p>
+              {item.image_url && <img src={item.image_url} alt={item.name} className="schedule-admin-preview" />}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                {!item.handled_at && (
+                  <button className="btn btn-sm btn-pitch" onClick={() => markContactHandled(item.id)} disabled={contactActionId === item.id}>
+                    {contactActionId === item.id ? 'מעדכן...' : 'טופל'}
+                  </button>
+                )}
+                <button className="btn btn-sm btn-outline" onClick={() => deleteContact(item.id)} disabled={contactActionId === item.id}>
+                  {contactActionId === item.id ? 'מוחק...' : 'מחק'}
+                </button>
+              </div>
+            </div>
+          ))}
+          {contactMessages.length === 0 && (
+            <div style={{ color: 'var(--muted)' }}>אין פניות עדיין.</div>
+          )}
+        </div>
+      </SettingsCard>
+    </div>
+  );
+}
+
+function SettingsCard({ title, children }) {
+  return (
+    <div style={{
+      background: 'var(--paper-pure)',
+      border: '1px solid var(--line)',
+      borderRadius: 6,
+      padding: 24,
+      marginBottom: 16
+    }}>
+      <h3 style={{
+        marginTop: 0,
+        marginBottom: 16,
+        fontFamily: 'var(--font-display)',
+        fontSize: 22,
+        letterSpacing: 1,
+        color: 'var(--ink)',
+        borderBottom: '2px solid var(--gold)',
+        paddingBottom: 6,
+        display: 'inline-block'
+      }}>{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function NumField({ label, value, onChange, min, max, step = '1' }) {
+  return (
+    <div className="field">
+      <label>{label}</label>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value ?? ''}
+        onChange={e => onChange(e.target.value)}
+      />
+    </div>
+  );
+}
+
+function BadgesTab() {
+  const { t } = useTranslation();
+  const [ids, setIds] = useState([]);
+  const [coinIds, setCoinIds] = useState([]);
+  const [config, setConfig] = useState(null);
+  const [saved, setSaved] = useState(null);
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    api.get('/admin/badges')
+      .then(r => { setIds(r.data.ids || []); setCoinIds(r.data.coin_badge_ids || []); setConfig(r.data.config); setSaved(JSON.stringify(r.data.config)); })
+      .catch(e => setErr(errMsg(e)));
+  };
+  useEffect(() => { load(); }, []);
+
+  if (!config) return <div style={{ color: 'var(--muted)' }}>{err || t('common.loading')}</div>;
+
+  const updBadge = (id, key, value) =>
+    setConfig(c => ({ ...c, badges: { ...c.badges, [id]: { ...c.badges[id], [key]: value } } }));
+  const updThreshold = (key, value) =>
+    setConfig(c => ({ ...c, thresholds: { ...c.thresholds, [key]: value } }));
+  const updCoinBadge = (id, key, value) =>
+    setConfig(c => ({ ...c, coin_badges: { ...c.coin_badges, [id]: { ...(c.coin_badges || {})[id], [key]: value } } }));
+  const metricLabel = { rank: 'דירוג =', win_rate: 'אחוז ניצחון ≥', balance: 'יתרת שיחים ≥', bets_settled: 'ניחושים שיושבו ≥', bets_won: 'ניחושים שזכו ≥' };
+
+  const save = async () => {
+    setErr(''); setOk(''); setBusy(true);
+    try {
+      const { data } = await api.post('/admin/badges', config);
+      setConfig(data.config); setSaved(JSON.stringify(data.config));
+      setOk(t('admin.badges_saved'));
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+  };
+
+  const dirty = JSON.stringify(config) !== saved;
+
+  return (
+    <div style={{ maxWidth: 760 }}>
+      {err && <div className="alert alert-error">{err}</div>}
+      {ok && <div className="alert alert-success">{ok}</div>}
+
+      <SettingsCard title={t('admin.tab_badges')}>
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>{t('admin.badges_help')}</p>
+        <div className="badge-admin-list">
+          {ids.map(id => {
+            const b = config.badges[id] || {};
+            return (
+              <div key={id} className={`badge-admin-row ${b.enabled ? '' : 'disabled'}`}>
+                <span className="badge-admin-emoji-preview">{b.emoji}</span>
+                <div className="badge-admin-meta">
+                  <strong>{t(`badge.${id}.name`)}</strong>
+                  <span style={{ color: 'var(--muted)', fontSize: 12 }}>{t(`badge.${id}.desc`)}</span>
+                </div>
+                <input
+                  className="badge-admin-emoji-input"
+                  value={b.emoji || ''}
+                  onChange={e => updBadge(id, 'emoji', e.target.value)}
+                  maxLength={8}
+                  aria-label="emoji"
+                />
+                <label className="badge-admin-toggle">
+                  <input
+                    type="checkbox"
+                    checked={!!b.enabled}
+                    onChange={e => updBadge(id, 'enabled', e.target.checked)}
+                  />
+                  <span>{b.enabled ? t('admin.badge_on') : t('admin.badge_off')}</span>
+                </label>
+              </div>
+            );
+          })}
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title={t('admin.badge_thresholds')}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
+          <NumField label={t('admin.badge_centurion_points')} value={config.thresholds.centurion_points}
+            onChange={v => updThreshold('centurion_points', v)} />
+          <NumField label={t('admin.badge_min_predictions')} value={config.thresholds.min_predictions}
+            onChange={v => updThreshold('min_predictions', v)} />
+          <NumField label={t('admin.badge_min_streak')} value={config.thresholds.min_streak}
+            onChange={v => updThreshold('min_streak', v)} />
+          <NumField label="מינימום נקודות לקבלת תגים" value={config.thresholds.min_points}
+            onChange={v => updThreshold('min_points', v)} />
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="תגי שיחים (10 הישגי מטבעות)">
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>אימוג'י, שם וסף לכל תג. התג מוענק אוטומטית בלוח מצטייני השיחים.</p>
+        <div className="badge-admin-list">
+          {coinIds.map(id => {
+            const b = (config.coin_badges || {})[id] || {};
+            return (
+              <div key={id} className={`badge-admin-row ${b.enabled ? '' : 'disabled'}`}>
+                <span className="badge-admin-emoji-preview">{b.emoji}</span>
+                <input className="badge-admin-emoji-input" value={b.emoji || ''} maxLength={8}
+                  onChange={e => updCoinBadge(id, 'emoji', e.target.value)} aria-label="emoji" />
+                <input style={{ flex: 1, minWidth: 100 }} value={b.label || ''}
+                  onChange={e => updCoinBadge(id, 'label', e.target.value)} aria-label="label" />
+                <span style={{ color: 'var(--muted)', fontSize: 12, whiteSpace: 'nowrap' }}>{metricLabel[b.metric] || b.metric}</span>
+                <input type="number" min="0" style={{ width: 90 }} value={b.threshold ?? 0}
+                  onChange={e => updCoinBadge(id, 'threshold', Number(e.target.value))} aria-label="threshold" />
+                <label className="badge-admin-toggle">
+                  <input type="checkbox" checked={!!b.enabled} onChange={e => updCoinBadge(id, 'enabled', e.target.checked)} />
+                  <span>{b.enabled ? t('admin.badge_on') : t('admin.badge_off')}</span>
+                </label>
+              </div>
+            );
+          })}
+        </div>
+      </SettingsCard>
+
+      <button className="btn btn-pitch" onClick={save} disabled={busy || !dirty}>
+        {busy ? t('common.saving') : t('common.save_all')}
+      </button>
+    </div>
+  );
+}
+
+function MessagesTab() {
+  const [users, setUsers] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [draft, setDraft] = useState({
+    subject: '',
+    body: '',
+    department: '',
+    include_login_details: true,
+    attachments: []
+  });
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [search, setSearch] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
+  const [resultsBusy, setResultsBusy] = useState(false);
+  const [resultsPreviewUrl, setResultsPreviewUrl] = useState('');
+  const [resultsPreviewBusy, setResultsPreviewBusy] = useState(false);
+  const [resultsPreviewErr, setResultsPreviewErr] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    let currentUrl = '';
+
+    const loadPreview = async () => {
+      setResultsPreviewBusy(true);
+      setResultsPreviewErr('');
+      try {
+        const { data } = await api.get(`/admin/user-results/preview?_ts=${Date.now()}`, { responseType: 'blob' });
+        currentUrl = URL.createObjectURL(data);
+        if (alive) {
+          setResultsPreviewUrl(currentUrl);
+        } else {
+          URL.revokeObjectURL(currentUrl);
+        }
+      } catch (e) {
+        if (alive) {
+          setResultsPreviewErr(errMsg(e));
+        }
+      } finally {
+        if (alive) setResultsPreviewBusy(false);
+      }
+    };
+
+    loadPreview();
+
+    return () => {
+      alive = false;
+      if (currentUrl) URL.revokeObjectURL(currentUrl);
+    };
+  }, []);
+
+  const sendLeaderboardReport = async () => {
+    setReportBusy(true); setErr(''); setOk('');
+    try {
+      const { data } = await api.post('/admin/leaderboard-report/send');
+      setOk(`דוח טבלת המצטיינים נשלח אל ${data.to} (${data.count} משתתפים)`);
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setReportBusy(false);
+    }
+  };
+
+  const sendUserResultsReport = async () => {
+    setResultsBusy(true); setErr(''); setOk('');
+    try {
+      const { data } = await api.post('/admin/user-results/send');
+      if (data?.skipped) {
+        setOk(`שליחת תוצאות למשתמשים דולגה (${data.skipped})`);
+      } else {
+        setOk(`נשלחו ${data.sent} דוחות למשתמשים (${data.failed} נכשלו)`);
+      }
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setResultsBusy(false);
+    }
+  };
+
+  const refreshResultsPreview = async () => {
+    setResultsPreviewBusy(true);
+    setResultsPreviewErr('');
+    try {
+      const { data } = await api.get(`/admin/user-results/preview?_ts=${Date.now()}`, { responseType: 'blob' });
+      const nextUrl = URL.createObjectURL(data);
+      setResultsPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return nextUrl;
+      });
+    } catch (e) {
+      setResultsPreviewErr(errMsg(e));
+    } finally {
+      setResultsPreviewBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/admin/users'),
+      api.get('/admin/departments')
+    ])
+      .then(([usersRes, depRes]) => {
+        const nextUsers = (usersRes.data || []).filter((u) => !u.is_admin);
+        setUsers(nextUsers);
+        setDepartments(depRes.data?.departments || []);
+      })
+      .catch((e) => setErr(errMsg(e)));
+  }, []);
+
+  const visibleUsers = users.filter((user) => {
+    if (draft.department && user.department !== draft.department) return false;
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return String(user.name || '').toLowerCase().includes(q)
+      || String(user.email || '').toLowerCase().includes(q)
+      || String(user.department || '').toLowerCase().includes(q);
+  });
+
+  const finalRecipients = users
+    .filter((user) => {
+      if (draft.department && user.department !== draft.department) return false;
+      if (selectedIds.length) return selectedIds.includes(user.id);
+      return !!draft.department;
+    })
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'he'));
+
+  const toggleUser = (id) => {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  const selectAllVisible = () => {
+    setSelectedIds(Array.from(new Set([...selectedIds, ...visibleUsers.map((u) => u.id)])));
+  };
+
+  const clearVisible = () => {
+    const visibleSet = new Set(visibleUsers.map((u) => u.id));
+    setSelectedIds((prev) => prev.filter((id) => !visibleSet.has(id)));
+  };
+
+  const selectDepartment = () => {
+    if (!draft.department) return;
+    const ids = users.filter((u) => u.department === draft.department).map((u) => u.id);
+    setSelectedIds(Array.from(new Set([...selectedIds, ...ids])));
+  };
+
+  const sendEmails = async () => {
+    if (!draft.subject.trim() || !draft.body.trim()) {
+      setErr('יש להזין כותרת ותוכן הודעה');
+      return;
+    }
+    if (!selectedIds.length && !draft.department) {
+      setErr('יש לבחור לפחות נמען אחד, או לבחור מחלקה');
+      return;
+    }
+    if (!confirm('לשלוח את האימייל לנמענים שנבחרו?')) return;
+
+    setBusy(true);
+    setErr('');
+    setOk('');
+    try {
+      const form = new FormData();
+      form.append('subject', draft.subject);
+      form.append('body', draft.body);
+      form.append('department', draft.department || '');
+      form.append('include_login_details', draft.include_login_details ? '1' : '0');
+      form.append('recipient_ids', JSON.stringify(selectedIds));
+      Array.from(draft.attachments || []).forEach((file) => form.append('attachments', file));
+
+      const { data } = await api.post('/admin/send-emails', form);
+      const msg = data.failed
+        ? `נשלחו ${data.sent} אימיילים, ${data.failed} נכשלו. קמפיין #${data.campaign_id}`
+        : `נשלחו ${data.sent} אימיילים בהצלחה. קמפיין #${data.campaign_id}`;
+      setOk(msg);
+      setDraft({
+        subject: '',
+        body: '',
+        department: '',
+        include_login_details: true,
+        attachments: []
+      });
+      setSelectedIds([]);
+      setSearch('');
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: 1120 }}>
+      {err && <div className="alert alert-error">{err}</div>}
+      {ok && <div className="alert alert-success">{ok}</div>}
+
+      <SettingsCard title="דוח יומי — טבלת המצטיינים">
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
+          מדי יום ב-06:00 (שעון ישראל) נשלחת אוטומטית תמונת טבלת המצטיינים אל "מנהלת שליחות"
+          (כתובת המנהל/ת בהגדרות SMTP). ניתן לשלוח דוגמה עכשיו:
+        </p>
+        <button className="btn btn-sm btn-gold" onClick={sendLeaderboardReport} disabled={reportBusy}>
+          {reportBusy ? 'שולח...' : 'שלח דוח לדוגמה עכשיו'}
+        </button>
+      </SettingsCard>
+
+      <SettingsCard title="שליחת תוצאות למשתמשים">
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
+          שולח ידנית את דוח תוצאות המשתמשים לפי ההגדרות הנוכחיות, כולל שעת השליחה וקהל היעד.
+        </p>
+        <div style={{
+          border: '1px solid var(--line)',
+          borderRadius: 8,
+          padding: 14,
+          marginBottom: 14,
+          background: 'rgba(255,255,255,0.6)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+            <strong>תצוגה מקדימה של התמונה שתישלח</strong>
+            <button className="btn btn-sm btn-outline" onClick={refreshResultsPreview} disabled={resultsPreviewBusy}>
+              {resultsPreviewBusy ? 'מרענן...' : 'רענן דוגמה'}
+            </button>
+          </div>
+          {resultsPreviewErr && (
+            <div className="alert alert-error" style={{ marginBottom: 12 }}>{resultsPreviewErr}</div>
+          )}
+          {resultsPreviewUrl ? (
+            <img
+              src={resultsPreviewUrl}
+              alt="תצוגה מקדימה של דוח תוצאות למשתמשים"
+              className="schedule-admin-preview"
+              style={{ width: '100%', height: 'auto', display: 'block' }}
+            />
+          ) : (
+            <div style={{ color: 'var(--muted)', fontSize: 13 }}>
+              {resultsPreviewBusy ? 'טוען תצוגה מקדימה...' : 'אין תצוגה מקדימה זמינה כרגע'}
+            </div>
+          )}
+        </div>
+        <button className="btn btn-sm btn-gold" onClick={sendUserResultsReport} disabled={resultsBusy}>
+          {resultsBusy ? 'שולח...' : 'שלח תוצאות עכשיו'}
+        </button>
+      </SettingsCard>
+
+      <SettingsCard title="הודעת אימייל">
+        <div className="field" style={{ marginBottom: 16 }}>
+          <label>To:</label>
+          <div style={{
+            minHeight: 52,
+            border: '1px solid var(--line)',
+            borderRadius: 6,
+            padding: 10,
+            background: 'rgba(255,255,255,0.65)',
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+            alignItems: 'center'
+          }}>
+            {finalRecipients.length > 0 ? finalRecipients.map((user) => (
+              <span key={user.id} style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 10px',
+                borderRadius: 999,
+                background: 'rgba(45,110,62,0.10)',
+                border: '1px solid rgba(45,110,62,0.18)',
+                fontSize: 13
+              }}>
+                <strong>{user.name}</strong>
+                <span style={{ color: 'var(--muted)' }}>{user.email}</span>
+              </span>
+            )) : (
+              <span style={{ color: 'var(--muted)', fontSize: 13 }}>טרם נבחרו נמענים</span>
+            )}
+          </div>
+          <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 6 }}>
+            יוצגו כאן כל הנמענים שיקבלו בפועל את ההודעה לפי הבחירה הנוכחית.
+          </div>
+        </div>
+
+        <div className="admin-form-grid">
+          <div className="field">
+            <label>כותרת</label>
+            <input
+              type="text"
+              value={draft.subject}
+              onChange={(e) => setDraft((s) => ({ ...s, subject: e.target.value }))}
+              placeholder="כותרת ההודעה"
+            />
+          </div>
+          <div className="field">
+            <label>מחלקה</label>
+            <select
+              value={draft.department}
+              onChange={(e) => setDraft((s) => ({ ...s, department: e.target.value }))}
+            >
+              <option value="">כל המחלקות</option>
+              {departments.map((dep) => (
+                <option key={dep} value={dep}>{dep}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>גוף ההודעה</label>
+          <textarea
+            rows="8"
+            value={draft.body}
+            onChange={(e) => setDraft((s) => ({ ...s, body: e.target.value }))}
+            placeholder="תוכן האימייל"
+          />
+        </div>
+
+        <div className="field">
+          <label>תמונות / קבצים מצורפים</label>
+          <input
+            type="file"
+            multiple
+            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+            onChange={(e) => setDraft((s) => ({ ...s, attachments: Array.from(e.target.files || []) }))}
+          />
+          {draft.attachments.length > 0 && (
+            <div style={{ color: 'var(--muted)', fontSize: 13, marginTop: 8 }}>
+              {draft.attachments.map((file) => file.name).join(' | ')}
+            </div>
+          )}
+        </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+          <input
+            type="checkbox"
+            checked={draft.include_login_details}
+            onChange={(e) => setDraft((s) => ({ ...s, include_login_details: e.target.checked }))}
+          />
+          הוסף פרטי התחברות
+        </label>
+        <div style={{ color: 'var(--muted)', fontSize: 13, marginTop: 6 }}>
+          אם מסומן, כל נמען יקבל גם את כתובת האתר, שם המשתמש שלו והסיסמה לפי מספר הטלפון שמוגדר באתר.
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="בחירת נמענים">
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+          <input
+            style={{ flex: '1 1 260px', minWidth: 220 }}
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="חיפוש לפי שם / אימייל / מחלקה"
+          />
+          <button className="btn btn-outline" type="button" onClick={selectAllVisible}>בחר הכל</button>
+          <button className="btn btn-outline" type="button" onClick={clearVisible}>נקה בחירה</button>
+          <button className="btn btn-pitch" type="button" onClick={selectDepartment} disabled={!draft.department}>בחר לפי מחלקה</button>
+        </div>
+
+        <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 12 }}>
+          יישלח ל-{finalRecipients.length} משתמשים
+        </div>
+
+        <div style={{ display: 'grid', gap: 8, maxHeight: 420, overflow: 'auto' }}>
+          {visibleUsers.map((user) => (
+            <label key={user.id} style={{
+              display: 'grid',
+              gridTemplateColumns: '24px 1fr',
+              gap: 12,
+              alignItems: 'start',
+              padding: 12,
+              border: '1px solid var(--line)',
+              borderRadius: 6,
+              background: selectedIds.includes(user.id) ? 'rgba(45,110,62,0.08)' : 'var(--paper-pure)'
+            }}>
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(user.id)}
+                onChange={() => toggleUser(user.id)}
+              />
+              <div>
+                <div style={{ fontWeight: 700 }}>{user.name}</div>
+                <div style={{ color: 'var(--muted)', fontSize: 13 }}>
+                  {user.email} | {user.phone_number || 'אין טלפון'} | {user.department || 'ללא מחלקה'}
+                </div>
+              </div>
+            </label>
+          ))}
+          {visibleUsers.length === 0 && (
+            <div style={{ color: 'var(--muted)' }}>אין משתמשים להצגה</div>
+          )}
+        </div>
+
+        <div style={{ marginTop: 18 }}>
+          <button className="btn btn-gold" type="button" onClick={sendEmails} disabled={busy}>
+            {busy ? 'שולח...' : 'שלח אימייל לנמענים'}
+          </button>
+        </div>
+      </SettingsCard>
+    </div>
+  );
+}
+
+/* ─────────────── פעולות ─────────────── */
+function ActionsTab() {
+  const [err, setErr] = useState('');
+  const [ok, setOk]   = useState('');
+  const [busy, setBusy] = useState(null);
+  const [backupFile, setBackupFile] = useState(null);
+
+  const run = async (op, url, label) => {
+    setErr(''); setOk(''); setBusy(op);
+    try {
+      const r = await api.post(url);
+      setOk(`${label}: ${JSON.stringify(r.data)}`);
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const downloadBackup = async () => {
+    setErr(''); setOk(''); setBusy('backup-export');
+    try {
+      const { data, headers } = await api.get('/admin/site-backup/export', { responseType: 'blob' });
+      const blob = new Blob([data], { type: 'application/gzip' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const disposition = headers['content-disposition'] || '';
+      const match = disposition.match(/filename="([^"]+)"/);
+      a.href = url;
+      a.download = match?.[1] || 'site-backup.tar.gz';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setOk('קובץ הגיבוי הורד בהצלחה');
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const importBackup = async () => {
+    if (!backupFile) {
+      setErr('יש לבחור קובץ גיבוי לייבוא');
+      return;
+    }
+    if (!confirm('ייבוא הגיבוי יחליף את כל נתוני האתר הנוכחיים. להמשיך?')) return;
+
+    setErr(''); setOk(''); setBusy('backup-import');
+    try {
+      const formData = new FormData();
+      formData.append('file', backupFile);
+      const { data } = await api.post('/admin/site-backup/import', formData);
+      setOk(data?.message || 'הגיבוי יובא בהצלחה');
+      setBackupFile(null);
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      {err && <div className="alert alert-error">{err}</div>}
+      {ok  && <div className="alert alert-success" style={{ wordBreak: 'break-all' }}>{ok}</div>}
+
+      <ActionCard
+        title="חישוב נקודות מחדש"
+        desc="מחשב מחדש את הנקודות לכל הדירוגים על סמך תוצאות האצוות שהסתיימו ומשקלי הניקוד הנוכחיים. הרץ פעולה זו לאחר שינוי משקלי הניקוד או עדכון תוצאת אצווה."
+        btnLabel="חשב מחדש את כל הנקודות"
+        loading={busy === 'recalc'}
+        onClick={() => run('recalc', '/admin/recalculate', 'חישוב הושלם')}
+        variant="gold"
+      />
+
+      <div style={{
+        background: 'var(--paper-pure)',
+        border: '1px solid var(--line)',
+        borderRadius: 6,
+        padding: 24,
+        marginBottom: 16
+      }}>
+        <h3 style={{
+          marginTop: 0,
+          marginBottom: 8,
+          fontFamily: 'var(--font-display)',
+          fontSize: 22,
+          color: 'var(--ink)'
+        }}>גיבוי נתוני האתר</h3>
+        <p style={{ margin: 0, color: 'var(--muted)', fontSize: 14, lineHeight: 1.6 }}>
+          הורד גיבוי מלא הכולל את מסד הנתונים, כל התמונות/קבצי הנתונים שהועלו לאתר, וגם את קבצי המסמכים של הפוטר (`תקנון`, `פרטיות`, `Cookies`, `נגישות`, `מפת אתר`). ניתן גם להעלות גיבוי כזה כדי להחליף את נתוני המערכת הקיימים.
+        </p>
+
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 16 }}>
+          <button
+            className="btn btn-gold"
+            onClick={downloadBackup}
+            disabled={busy !== null}
+          >
+            {busy === 'backup-export' ? 'מייצא...' : 'הורד גיבוי מלא'}
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginTop: 18 }}>
+          <label className="btn btn-outline" style={{ cursor: 'pointer' }}>
+            בחר קובץ גיבוי לייבוא
+            <input
+              type="file"
+              accept=".sql,.tar.gz,.tgz,text/sql,application/gzip,application/x-gzip"
+              style={{ display: 'none' }}
+              onChange={(e) => setBackupFile(e.target.files?.[0] || null)}
+            />
+          </label>
+          <button
+            className="btn btn-pitch"
+            onClick={importBackup}
+            disabled={busy !== null || !backupFile}
+          >
+            {busy === 'backup-import' ? 'מייבא...' : 'ייבא גיבוי והחלף נתונים'}
+          </button>
+          <span style={{ color: 'var(--muted)', fontSize: 13 }}>
+            {backupFile ? `קובץ נבחר: ${backupFile.name}` : 'לא נבחר קובץ'}
+          </span>
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
+function ScheduleTab() {
+  const [items, setItems] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [drafts, setDrafts] = useState({});
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+  const [savingId, setSavingId] = useState(null);
+  const [savingStructure, setSavingStructure] = useState(false);
+
+  const buildDraft = (item, index = 0) => ({
+    title: item.title || '',
+    date_label: item.date_label || '',
+    description: item.description || '',
+    start_at: String(item.start_at || '').slice(0, 10),
+    end_at: String(item.end_at || '').slice(0, 10),
+    sort_order: item.sort_order ?? (index + 1) * 10,
+    prize_slot: item.prize_slot ?? '',
+    winner_user_id: item.winner_user_id ?? '',
+    popup_enabled: !!item.popup_enabled,
+    popup_title: item.popup_title || '',
+    prize_image_file: null,
+    popup_image_file: null,
+    prize_image_url: item.prize_image_url || '',
+    popup_image_url: item.popup_image_url || ''
+  });
+
+  const load = () => {
+    setErr('');
+    Promise.all([
+      api.get('/admin/schedule-items'),
+      api.get('/admin/users')
+    ]).then(([itemsRes, usersRes]) => {
+      const nextItems = itemsRes.data || [];
+      setItems(nextItems);
+      setUsers((usersRes.data || []).filter((u) => !u.is_admin));
+      setDrafts(Object.fromEntries(nextItems.map((item, index) => [item.id, buildDraft(item, index)])));
+    }).catch((e) => setErr(errMsg(e)));
+  };
+
+  useEffect(load, []);
+
+  const upd = (id, key, value) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], [key]: value }
+    }));
+  };
+
+  const renumberOrders = (nextItems) => {
+    setDrafts((prev) => {
+      const nextDrafts = { ...prev };
+      nextItems.forEach((item, index) => {
+        if (!nextDrafts[item.id]) nextDrafts[item.id] = buildDraft(item, index);
+        nextDrafts[item.id] = {
+          ...nextDrafts[item.id],
+          sort_order: (index + 1) * 10
+        };
+      });
+      return nextDrafts;
+    });
+  };
+
+  const addRow = () => {
+    const id = `new-${Date.now()}`;
+    const nextIndex = items.length;
+    const newItem = {
+      id,
+      title: '',
+      date_label: '',
+      description: '',
+      start_at: '',
+      end_at: '',
+      sort_order: (nextIndex + 1) * 10,
+      prize_slot: null,
+      winner_user_id: null,
+      popup_enabled: 0,
+      popup_title: '',
+      prize_image_url: '',
+      popup_image_url: ''
+    };
+    const nextItems = [...items, newItem];
+    setItems(nextItems);
+    setDrafts((prev) => ({ ...prev, [id]: buildDraft(newItem, nextIndex) }));
+    renumberOrders(nextItems);
+  };
+
+  const removeRow = (id) => {
+    const draft = drafts[id];
+    const label = draft?.title?.trim() || 'שורה חדשה';
+    if (!confirm(`למחוק את "${label}"?`)) return;
+    const nextItems = items.filter((item) => item.id !== id);
+    setItems(nextItems);
+    setDrafts((prev) => {
+      const nextDrafts = { ...prev };
+      delete nextDrafts[id];
+      return nextDrafts;
+    });
+    renumberOrders(nextItems);
+  };
+
+  const moveRow = (id, direction) => {
+    const index = items.findIndex((item) => item.id === id);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= items.length) return;
+    const nextItems = [...items];
+    const [row] = nextItems.splice(index, 1);
+    nextItems.splice(target, 0, row);
+    setItems(nextItems);
+    renumberOrders(nextItems);
+  };
+
+  const saveStructure = async () => {
+    if (!items.length) {
+      setErr('יש להגדיר לפחות שורה אחת בלוז');
+      return;
+    }
+    setSavingStructure(true);
+    setErr('');
+    setOk('');
+    try {
+      const payload = {
+        items: items.map((item, index) => {
+          const draft = drafts[item.id] || buildDraft(item, index);
+          return {
+            id: typeof item.id === 'number' ? item.id : null,
+            title: draft.title,
+            date_label: draft.date_label,
+            description: draft.description,
+            start_at: draft.start_at,
+            end_at: draft.end_at,
+            sort_order: Number.parseInt(draft.sort_order, 10) || (index + 1) * 10,
+            prize_slot: draft.prize_slot === '' ? null : Number.parseInt(draft.prize_slot, 10),
+            winner_user_id: draft.winner_user_id === '' ? null : Number.parseInt(draft.winner_user_id, 10),
+            popup_enabled: !!draft.popup_enabled,
+            popup_title: draft.popup_title || ''
+          };
+        })
+      };
+      const { data } = await api.post('/admin/schedule-items/structure', payload);
+      const nextItems = data.items || [];
+      setItems(nextItems);
+      setDrafts(Object.fromEntries(nextItems.map((item, index) => [item.id, buildDraft(item, index)])));
+      setOk('מבנה הלוז נשמר בהצלחה ונשמר כברירת המחדל של האתר');
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setSavingStructure(false);
+    }
+  };
+
+  const save = async (id) => {
+    const draft = drafts[id];
+    if (!draft) return;
+    if (typeof id !== 'number') {
+      setErr('יש לשמור קודם את מבנה הלוז כדי ליצור את השורה ב-DB, ורק אחר כך להעלות תמונות');
+      return;
+    }
+    setSavingId(id);
+    setErr('');
+    setOk('');
+    try {
+      const form = new FormData();
+      form.append('title', draft.title);
+      form.append('date_label', draft.date_label);
+      form.append('description', draft.description);
+      form.append('start_at', draft.start_at);
+      form.append('end_at', draft.end_at);
+      form.append('sort_order', String(draft.sort_order ?? 0));
+      form.append('prize_slot', draft.prize_slot === '' ? '' : String(draft.prize_slot));
+      form.append('winner_user_id', draft.winner_user_id === '' ? '' : String(draft.winner_user_id));
+      form.append('popup_enabled', draft.popup_enabled ? '1' : '0');
+      form.append('popup_title', draft.popup_title || '');
+      if (draft.prize_image_file) form.append('prize_image', draft.prize_image_file);
+      if (draft.popup_image_file) form.append('popup_image', draft.popup_image_file);
+
+      const { data } = await api.post(`/admin/schedule-items/${id}`, form);
+      const item = data.item;
+      setItems((prev) => prev.map((entry) => entry.id === id ? item : entry));
+      setDrafts((prev) => ({
+        ...prev,
+        [id]: {
+          ...prev[id],
+          prize_image_file: null,
+          popup_image_file: null,
+          prize_image_url: item.prize_image_url || '',
+          popup_image_url: item.popup_image_url || '',
+          winner_user_id: item.winner_user_id ?? '',
+          popup_title: item.popup_title || '',
+          popup_enabled: !!item.popup_enabled
+        }
+      }));
+      setOk(`שורה "${item.title}" נשמרה בהצלחה`);
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: 1120 }}>
+      {err && <div className="alert alert-error">{err}</div>}
+      {ok && <div className="alert alert-success">{ok}</div>}
+
+      <div style={{
+        display: 'flex',
+        gap: 12,
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 18
+      }}>
+        <div style={{ color: 'var(--muted)', fontSize: 14 }}>
+          כאן אפשר להוסיף/להסיר שורות, לשנות את הסדר ולשמור את כל מבנה הלוז בבת אחת. לאחר מכן אפשר לשמור תמונות לכל שורה בנפרד.
+        </div>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <button className="btn btn-outline" onClick={addRow}>הוסף שורה</button>
+          <button className="btn btn-gold" onClick={saveStructure} disabled={savingStructure}>
+            {savingStructure ? 'שומר מבנה...' : 'שמור את כל מבנה הלוז'}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: 16 }}>
+        {items.map((item, index) => {
+          const draft = drafts[item.id];
+          if (!draft) return null;
+          return (
+            <div key={item.id} style={{
+              background: 'var(--paper-pure)',
+              border: '1px solid var(--line)',
+              borderRadius: 6,
+              padding: 24
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 24 }}>{draft.title}</h3>
+                  <p style={{ margin: '6px 0 0', color: 'var(--muted)' }}>{draft.date_label}</p>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className="btn btn-outline" onClick={() => moveRow(item.id, -1)} disabled={index === 0}>למעלה</button>
+                  <button className="btn btn-outline" onClick={() => moveRow(item.id, 1)} disabled={index === items.length - 1}>למטה</button>
+                  <button className="btn btn-outline" onClick={() => removeRow(item.id)}>מחק שורה</button>
+                  <button className="btn btn-gold" onClick={() => save(item.id)} disabled={savingId === item.id}>
+                    {savingId === item.id ? 'שומר...' : 'שמור שורה / תמונות'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="admin-form-grid">
+                <div className="field">
+                  <label>שלב</label>
+                  <input type="text" value={draft.title} onChange={(e) => upd(item.id, 'title', e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>תצוגת תאריכים</label>
+                  <input type="text" value={draft.date_label} onChange={(e) => upd(item.id, 'date_label', e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>מה קורה</label>
+                  <input type="text" value={draft.description} onChange={(e) => upd(item.id, 'description', e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>סדר תצוגה</label>
+                  <input type="number" value={draft.sort_order} onChange={(e) => upd(item.id, 'sort_order', e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>תאריך התחלה</label>
+                  <input type="date" value={draft.start_at} onChange={(e) => upd(item.id, 'start_at', e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>תאריך סיום</label>
+                  <input type="date" value={draft.end_at} onChange={(e) => upd(item.id, 'end_at', e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>פרס</label>
+                  <select value={draft.prize_slot} onChange={(e) => upd(item.id, 'prize_slot', e.target.value)}>
+                    <option value="">ללא פרס</option>
+                    <option value="1">פרס 1</option>
+                    <option value="2">פרס 2</option>
+                    <option value="3">פרס 3</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>זוכה בפרס</label>
+                  <select value={draft.winner_user_id} onChange={(e) => upd(item.id, 'winner_user_id', e.target.value)}>
+                    <option value="">טרם נקבע</option>
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>{user.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>כותרת פופאפ</label>
+                  <input type="text" value={draft.popup_title} onChange={(e) => upd(item.id, 'popup_title', e.target.value)} />
+                </div>
+                <div className="field" style={{ justifyContent: 'center' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={draft.popup_enabled}
+                      onChange={(e) => upd(item.id, 'popup_enabled', e.target.checked)}
+                    />
+                    הפעל פופאפ בתאריכים האלה
+                  </label>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, marginTop: 18 }}>
+                <div className="field">
+                  <label>תמונת פרס</label>
+                  <input type="file" accept="image/*" onChange={(e) => upd(item.id, 'prize_image_file', e.target.files?.[0] || null)} />
+                  {draft.prize_image_url && <img src={draft.prize_image_url} alt={draft.title} className="schedule-admin-preview" />}
+                </div>
+                <div className="field">
+                  <label>תמונת פופאפ</label>
+                  <input type="file" accept="image/*" onChange={(e) => upd(item.id, 'popup_image_file', e.target.files?.[0] || null)} />
+                  {draft.popup_image_url && <img src={draft.popup_image_url} alt={draft.popup_title || draft.title} className="schedule-admin-preview" />}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ActionCard({ title, desc, btnLabel, loading, onClick, variant }) {
+  return (
+    <div style={{
+      background: 'var(--paper-pure)',
+      border: '1px solid var(--line)',
+      borderRadius: 6,
+      padding: 24,
+      marginBottom: 16,
+      display: 'flex',
+      gap: 24,
+      alignItems: 'center',
+      flexWrap: 'wrap'
+    }}>
+      <div style={{ flex: 1, minWidth: 280 }}>
+        <h3 style={{
+          marginTop: 0,
+          marginBottom: 8,
+          fontFamily: 'var(--font-display)',
+          fontSize: 22,
+          color: 'var(--ink)'
+        }}>{title}</h3>
+        <p style={{ margin: 0, color: 'var(--muted)', fontSize: 14, lineHeight: 1.6 }}>{desc}</p>
+      </div>
+      <button
+        className={`btn ${variant === 'gold' ? 'btn-gold' : 'btn-pitch'}`}
+        onClick={onClick}
+        disabled={loading}
+      >{loading ? 'רץ...' : btnLabel}</button>
+    </div>
+  );
+}

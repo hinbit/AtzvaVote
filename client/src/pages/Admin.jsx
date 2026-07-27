@@ -1804,6 +1804,7 @@ function SettingsTab() {
   const [footerDocs, setFooterDocs] = useState([]);
   const [footerDrafts, setFooterDrafts] = useState({});
   const [specialPopups, setSpecialPopups] = useState([]);
+  const [availableThemes, setAvailableThemes] = useState([]);
   const [savingDocKey, setSavingDocKey] = useState(null);
   const [savingPopupId, setSavingPopupId] = useState(null);
   const [deletingPopupId, setDeletingPopupId] = useState(null);
@@ -1819,11 +1820,17 @@ function SettingsTab() {
     Promise.all([
       api.get('/admin/settings'),
       api.get('/admin/footer-docs'),
-      api.get('/admin/special-popups')
+      api.get('/admin/special-popups'),
+      api.get('/site/theme')
     ])
-      .then(([settingsRes, footerRes, popupsRes]) => {
-        setSettings(settingsRes.data);
-        setDraft(settingsRes.data);
+      .then(([settingsRes, footerRes, popupsRes, themeRes]) => {
+        const mergedSettings = {
+          ...settingsRes.data,
+          active_theme: settingsRes.data.active_theme || themeRes.data.name || 'atzvavote'
+        };
+        setSettings(mergedSettings);
+        setDraft(mergedSettings);
+        setAvailableThemes(themeRes.data.available_themes || []);
         const docs = footerRes.data.docs || [];
         setFooterDocs(docs);
         setFooterDrafts(Object.fromEntries(docs.map((doc) => [doc.doc_key, {
@@ -1858,9 +1865,11 @@ function SettingsTab() {
   const save = async () => {
     setErr(''); setOk('');
     try {
+      const themeChanged = settings.active_theme !== draft.active_theme;
       await api.post('/admin/settings', draft);
       setSettings(draft);
       setOk('ההגדרות נשמרו בהצלחה');
+      if (themeChanged) window.location.reload();
     } catch (e) {
       setErr(errMsg(e));
     }
@@ -1982,6 +1991,27 @@ function SettingsTab() {
     <div style={{ maxWidth: 720 }}>
       {err && <div className="alert alert-error">{err}</div>}
       {ok  && <div className="alert alert-success">{ok}</div>}
+
+      <SettingsCard title="ערכת נושא (Theme)">
+        <div className="field">
+          <label htmlFor="active-theme">העיצוב הפעיל בכל האתר</label>
+          <select
+            id="active-theme"
+            value={draft.active_theme || 'atzvavote'}
+            onChange={(e) => upd('active_theme', e.target.value)}
+          >
+            {availableThemes.map((item) => (
+              <option key={item.name} value={item.name}>
+                {item.display_name?.he || item.display_name?.en || item.name} ({item.name})
+              </option>
+            ))}
+          </select>
+        </div>
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 8, marginBottom: 0 }}>
+          לכל ערכה מסך כניסה, צבעים, לוגו ושמות ייחודיים. לאחר לחיצה על "שמור שינויים"
+          העמוד יתרענן והערכה החדשה תחול מיד, ללא הפעלה מחדש של השרת.
+        </p>
+      </SettingsCard>
 
       <SettingsCard title="מערכת שיחים (שיח-מרקט)">
         <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>

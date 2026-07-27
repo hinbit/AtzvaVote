@@ -6,7 +6,7 @@ const db = require('../db');
 const { auth } = require('../middleware/auth');
 const { seedFooterDocuments } = require('../lib/footer-content');
 const { seedTranslations, normalizeLanguage, SUPPORTED_LANGUAGES } = require('../lib/translations');
-const { getActiveTheme, getThemeNameOverrides } = require('../lib/themes');
+const { getActiveTheme, getThemeNameOverrides, listThemes, activeThemeName } = require('../lib/themes');
 const { parseSpecialPopups } = require('../lib/special-popups');
 const { getShabbatState } = require('../lib/shabbat');
 
@@ -15,6 +15,11 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 }
 });
+
+async function configuredThemeName() {
+  const row = await db.one("SELECT `value` FROM settings WHERE `key` = 'active_theme'");
+  return activeThemeName(row?.value);
+}
 
 async function ensureWritableUploadDir(candidates) {
   let lastError = null;
@@ -117,7 +122,7 @@ router.get('/translations', auth(false), async (req, res) => {
     const items = Object.fromEntries(rows.map((row) => [row.translation_key, row.translation_value]));
 
     // דריסת שמות (תפריט / שם אפליקציה) לפי ערכת הנושא הפעילה
-    const overrides = getThemeNameOverrides();
+    const overrides = getThemeNameOverrides(await configuredThemeName());
     for (const [key, byLang] of Object.entries(overrides)) {
       const val = byLang && (byLang[language] || byLang.he || byLang.en);
       if (val) items[key] = val;
@@ -133,7 +138,8 @@ router.get('/translations', auth(false), async (req, res) => {
 // קונפיגורציית ערכת הנושא הפעילה (צבעים / נכסים / תמונות תגים)
 router.get('/theme', auth(false), async (req, res) => {
   try {
-    res.json(getActiveTheme());
+    const theme = getActiveTheme(await configuredThemeName());
+    res.json({ ...theme, available_themes: listThemes() });
   } catch (e) {
     console.error('site/theme:', e);
     res.status(500).json({ error: 'שגיאת שרת' });

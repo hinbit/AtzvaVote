@@ -1,4 +1,5 @@
-// טעינת ערכת נושא (theme) פעילה. הערכה נבחרת דרך משתנה הסביבה THEME (ברירת מחדל: atzvavote).
+// טעינת ערכות נושא. הערכה הפעילה יכולה להגיע מהגדרת מסד הנתונים,
+// ובנפילה לאחור דרך משתנה הסביבה THEME (ברירת מחדל: atzvavote).
 // כל הערכות נמצאות ב-resources/themes/{name}/ ומכילות theme.json + נכסים (logo/bg/favicon).
 const fs = require('fs');
 const path = require('path');
@@ -24,10 +25,41 @@ function loadThemeJson(name) {
 }
 
 // שם הערכה הפעילה (נבדק שקיים, אחרת ברירת מחדל)
-function activeThemeName() {
-  const requested = (process.env.THEME || '').trim() || DEFAULT_THEME;
+function activeThemeName(override) {
+  const requested = String(override || process.env.THEME || '').trim() || DEFAULT_THEME;
   if (loadThemeJson(requested)) return requested;
   return DEFAULT_THEME;
+}
+
+function listThemes() {
+  let names = [];
+  try {
+    names = fs.readdirSync(THEMES_DIR, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    names = [];
+  }
+
+  const preferredOrder = [DEFAULT_THEME, 'seach', 'hinbit', '4pharma', 'friends'];
+  return names
+    .filter((name) => loadThemeJson(name))
+    .sort((a, b) => {
+      const ai = preferredOrder.indexOf(a);
+      const bi = preferredOrder.indexOf(b);
+      if (ai === -1 && bi === -1) return a.localeCompare(b);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    })
+    .map((name) => {
+      const theme = loadThemeJson(name) || {};
+      return {
+        name,
+        display_name: theme.display_name || { he: name, en: name, ar: name },
+        variant: theme.login?.variant || ''
+      };
+    });
 }
 
 // מיזוג הגדרות התגים: ערכת הנושא הפעילה גוברת, עם נפילה לערכת ברירת המחדל.
@@ -36,7 +68,9 @@ function resolveBadgeImages(activeName, active, fallback) {
   const merge = (theme, themeName) => {
     const badges = (theme && theme.badges) || {};
     for (const [id, def] of Object.entries(badges)) {
-      if (def && def.image) out[id] = `/theme-assets/${encodeURIComponent(def.image)}?theme=${themeName}`;
+      if (def && def.image) {
+        out[id] = `/theme-assets/${encodeURIComponent(themeName)}/${encodeURIComponent(def.image)}`;
+      }
     }
   };
   // קודם fallback, אחר כך הפעילה — כך שהפעילה דורסת
@@ -46,12 +80,14 @@ function resolveBadgeImages(activeName, active, fallback) {
 }
 
 // מחזיר את הקונפיגורציה של הערכה הפעילה עבור הלקוח
-function getActiveTheme() {
-  const name = activeThemeName();
+function getActiveTheme(override) {
+  const name = activeThemeName(override);
   const active = loadThemeJson(name) || {};
   const fallback = loadThemeJson(DEFAULT_THEME) || {};
   const assets = active.assets || fallback.assets || {};
-  const assetUrl = (file) => (file ? `/theme-assets/${encodeURIComponent(file)}` : null);
+  const assetUrl = (file, assetTheme = name) => (
+    file ? `/theme-assets/${encodeURIComponent(assetTheme)}/${encodeURIComponent(file)}` : null
+  );
 
   return {
     name,
@@ -70,8 +106,8 @@ function getActiveTheme() {
 }
 
 // דריסות שמות (תפריט / שם אפליקציה) של הערכה הפעילה — להזרקה לתוך התרגומים
-function getThemeNameOverrides() {
-  const active = loadThemeJson(activeThemeName());
+function getThemeNameOverrides(override) {
+  const active = loadThemeJson(activeThemeName(override));
   return (active && active.names) || {};
 }
 
@@ -83,6 +119,8 @@ function activeThemeAssetsDir() {
 module.exports = {
   getActiveTheme,
   getThemeNameOverrides,
+  listThemes,
+  loadThemeJson,
   activeThemeName,
   activeThemeAssetsDir,
   themeDir,

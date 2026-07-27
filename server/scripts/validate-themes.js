@@ -5,6 +5,7 @@ const themesDir = path.join(__dirname, '..', '..', 'resources', 'themes');
 const requiredLoginFields = ['variant', 'icon', 'seal', 'kicker', 'headline', 'tagline', 'cta'];
 const localizedFields = ['seal', 'kicker', 'headline', 'tagline', 'cta'];
 const supportedLanguages = ['he', 'en', 'ar'];
+const { DEFAULT_THEME, getActiveTheme, listThemes } = require('../lib/themes');
 
 const failures = [];
 const variants = new Map();
@@ -51,6 +52,24 @@ for (const directory of fs.readdirSync(themesDir).sort()) {
       failures.push(`${directory}: asset does not exist (${assets[field]})`);
     }
   }
+}
+
+const listedThemes = listThemes();
+if (listedThemes.length !== checked) {
+  failures.push(`listThemes returned ${listedThemes.length} themes, expected ${checked}`);
+}
+for (const listed of listedThemes) {
+  const resolved = getActiveTheme(listed.name);
+  if (resolved.name !== listed.name) failures.push(`${listed.name}: cannot be selected dynamically`);
+  for (const field of ['logo', 'bg1', 'bg2', 'favicon']) {
+    const expectedPrefix = `/theme-assets/${encodeURIComponent(listed.name)}/`;
+    if (!resolved.assets[field]?.startsWith(expectedPrefix)) {
+      failures.push(`${listed.name}: assets.${field} is not theme-scoped`);
+    }
+  }
+}
+if (getActiveTheme('__theme_does_not_exist__').name !== DEFAULT_THEME) {
+  failures.push('unknown theme does not fall back to the default theme');
 }
 
 if (failures.length) {

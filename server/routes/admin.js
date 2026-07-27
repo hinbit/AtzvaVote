@@ -14,6 +14,7 @@ const { auth } = require('../middleware/auth');
 const { recalcForBatch, loadBadgeConfig, DEFAULT_BADGE_CONFIG, leaderboard, currentQuarter } = require('../services/scoring');
 const { isValidStage } = require('../data/stages');
 const { getShabbatState } = require('../lib/shabbat');
+const { listThemes } = require('../lib/themes');
 
 // אתר שומר שבת — חוסם שליחת הודעות בזמן שבת אם המצב פעיל. מחזיר true אם נחסם.
 async function blockedByShabbat(res) {
@@ -1817,6 +1818,13 @@ router.get('/settings', async (req, res) => {
 
 router.post('/settings', async (req, res) => {
   try {
+    const requestedTheme = req.body?.active_theme;
+    if (requestedTheme !== undefined) {
+      const allowedThemes = new Set(listThemes().map((theme) => theme.name));
+      if (!allowedThemes.has(String(requestedTheme))) {
+        return res.status(400).json({ error: 'ערכת הנושא שנבחרה אינה קיימת' });
+      }
+    }
     await db.tx(async (t) => {
       for (const [k, v] of Object.entries(req.body || {})) {
         await t.run(

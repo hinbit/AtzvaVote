@@ -10,7 +10,13 @@ const db = require('./db');
 const { sendLeaderboardReport, sendUserResultsReport } = require('./services/leaderboard-report');
 const { sendActivityReport } = require('./services/activity-report');
 const { getDatePartsInTz, getShabbatState } = require('./lib/shabbat');
-const { activeThemeAssetsDir, themeDir, DEFAULT_THEME, activeThemeName } = require('./lib/themes');
+const {
+  activeThemeAssetsDir,
+  themeDir,
+  loadThemeJson,
+  DEFAULT_THEME,
+  activeThemeName
+} = require('./lib/themes');
 
 const app = express();
 app.use(cors());
@@ -18,7 +24,20 @@ app.use(express.json({ limit: '1mb' }));
 app.use('/data', express.static(path.join(__dirname, '..', 'data')));
 app.use('/docs', express.static(path.join(__dirname, '..', 'docs')));
 
-// נכסי ערכת הנושא: קודם הערכה הפעילה, ואז ברירת המחדל (seach) כנפילה לכל נכס חסר
+// כתובת יציבה לכל ערכה מאפשרת להחליף Theme מתוך מסד הנתונים ללא הפעלה מחדש.
+app.get('/theme-assets/:theme/:file', (req, res, next) => {
+  const requestedTheme = String(req.params.theme || '');
+  const file = path.basename(String(req.params.file || ''));
+  if (!file || !loadThemeJson(requestedTheme)) return res.sendStatus(404);
+
+  const primary = path.join(themeDir(requestedTheme), file);
+  if (fs.existsSync(primary)) return res.sendFile(primary);
+  const fallback = path.join(themeDir(DEFAULT_THEME), file);
+  if (fs.existsSync(fallback)) return res.sendFile(fallback);
+  return next();
+});
+
+// תאימות לאחור לכתובות נכסים שנוצרו לפני הוספת בורר הערכות.
 app.use('/theme-assets', express.static(activeThemeAssetsDir()));
 app.use('/theme-assets', express.static(themeDir(DEFAULT_THEME)));
 console.log(`🎨 ערכת נושא פעילה: ${activeThemeName()}`);

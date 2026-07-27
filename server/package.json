@@ -9,6 +9,8 @@
     "db:create": "node scripts/db-create.js",
     "db:init": "node scripts/db-init.js",
     "db:seed": "node seed.js",
+    "db:fill_all": "npm run db:init && npm run db:seed",
+    "test:themes": "node scripts/validate-themes.js",
     "db:setup": "npm run db:create && npm run db:init && npm run db:seed",
     "db:reset": "node scripts/db-reset.js"
   },

@@ -21,7 +21,9 @@ export default function SiteFooter() {
       .then((r) => {
         const nextDocs = r.data || [];
         setDocs(nextDocs);
-        if (withConsent && !localStorage.getItem('atzva_terms_accepted')) {
+        // אל תכסה את מסך הכניסה במסמך PDF. בהרשמה קיימת כבר הסכמה מפורשת;
+        // למשתמש מחובר שטרם אישר עדיין מציגים את התקנון פעם אחת.
+        if (withConsent && user?.id && !localStorage.getItem('atzva_terms_accepted')) {
           const termsDoc = nextDocs.find((item) => item.doc_key === 'rules') || nextDocs[0];
           if (termsDoc) {
             setDoc(termsDoc);
@@ -38,7 +40,7 @@ export default function SiteFooter() {
     const onUpdated = () => loadDocs(false);
     window.addEventListener('footer-docs-updated', onUpdated);
     return () => window.removeEventListener('footer-docs-updated', onUpdated);
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     setContactDraft((prev) => ({

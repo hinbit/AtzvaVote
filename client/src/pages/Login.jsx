@@ -9,7 +9,7 @@ import LanguageSelector from '../components/LanguageSelector';
 export default function Login() {
   const { user, login, register, guestStart } = useAuth();
   const { t, language } = useTranslation();
-  const { assets } = useTheme();
+  const { theme, assets } = useTheme();
   const nav = useNavigate();
   const [mode, setMode] = useState('login');
   const [showAuthForm, setShowAuthForm] = useState(false);
@@ -21,6 +21,14 @@ export default function Login() {
   const [acceptedRanking, setAcceptedRanking] = useState(false);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const loginTheme = theme?.login || {};
+  const loginVariant = loginTheme.variant || theme?.name || 'default';
+  const themeText = (field, fallback) => {
+    const value = loginTheme[field];
+    if (!value) return fallback;
+    if (typeof value === 'string') return value;
+    return value[language] || value.he || value.en || fallback;
+  };
 
   if (user) return <Navigate to="/" replace />;
 
@@ -58,7 +66,7 @@ export default function Login() {
   };
 
   return (
-    <div className="login-page">
+    <div className={`login-page login-variant-${loginVariant}`} data-login-theme={theme?.name || 'loading'}>
       <div style={{ position: 'absolute', top: 16, left: 16, zIndex: 3 }}>
         <LanguageSelector />
       </div>
@@ -66,15 +74,19 @@ export default function Login() {
         <img className="login-top-logo" src={assets.logo || '/shiah-logo-white.png'} alt="logo" />
       </div>
       <div className="login-hero">
+        <div className="login-theme-seal" aria-hidden="true">
+          <span>{loginTheme.icon || '✓'}</span>
+          <small>{themeText('seal', theme?.display_name?.[language] || theme?.name || 'AtzvaVote')}</small>
+        </div>
         <div style={{position:'relative'}}>
           <div style={{fontFamily:'var(--font-display)', fontSize: 18, letterSpacing: '0.3em', color:'var(--gold)'}}>
-            {t('login.hero_kicker')}
+            {themeText('kicker', t('login.hero_kicker'))}
           </div>
           <h1>
-            {t('common.app_name')}
+            {themeText('headline', t('common.app_name'))}
           </h1>
           <p className="tag">
-            {t('login.hero_tagline')}
+            {themeText('tagline', t('login.hero_tagline'))}
           </p>
         </div>
         <div className="meta">
@@ -94,7 +106,7 @@ export default function Login() {
             disabled={guestBusy}
             style={{ width: '100%', justifyContent: 'center', padding: '20px', fontSize: 22, fontWeight: 800 }}
           >
-            {guestBusy ? <span className="spinner" /> : 'בוא נשחק'}
+            {guestBusy ? <span className="spinner" /> : themeText('cta', 'בוא נשחק')}
           </button>
           <p className="sub" style={{ textAlign: 'center', marginTop: 10 }}>
             התחל לנחש מיד — הפרטים יתבקשו בסיום.

@@ -13,6 +13,19 @@
       "ar": "تصويت الدفعة · سياتش"
     }
   },
+  "login": {
+    "variant": "signal",
+    "icon": "⌁",
+    "seal": { "he": "Human signal", "en": "Human signal", "ar": "إشارة بشرية" },
+    "kicker": { "he": "HINBIT · HUMAN INTELLIGENCE", "en": "HINBIT · HUMAN INTELLIGENCE", "ar": "HINBIT · HUMAN INTELLIGENCE" },
+    "headline": { "he": "אות אנושי. החלטה חכמה.", "en": "HUMAN SIGNAL. SMARTER CALL.", "ar": "إشارة بشرية. قرار أذكى." },
+    "tagline": {
+      "he": "מחברים תחושות מהשטח לתמונה אחת שאפשר לפעול לפיה.",
+      "en": "Turn field intuition into one actionable intelligence layer.",
+      "ar": "نحوّل الحدس الميداني إلى طبقة معلومات قابلة للتنفيذ."
+    },
+    "cta": { "he": "כניסה למערכת", "en": "Enter system", "ar": "دخول النظام" }
+  },
   "assets": {
     "logo": "logo-green.png",
     "bg1": "bg1.png",

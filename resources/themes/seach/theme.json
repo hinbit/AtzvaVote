@@ -13,6 +13,19 @@
       "ar": "تصويت الدفعة · سياتش"
     }
   },
+  "login": {
+    "variant": "cultivation",
+    "icon": "🌿",
+    "seal": { "he": "מהשטח למדד", "en": "Field to signal", "ar": "من الحقل إلى المؤشر" },
+    "kicker": { "he": "הידע צומח מבפנים", "en": "KNOWLEDGE GROWS WITHIN", "ar": "المعرفة تنمو من الداخل" },
+    "headline": { "he": "האצווה בידיים שלכם", "en": "THE BATCH IS IN YOUR HANDS", "ar": "الدفعة بين أيديكم" },
+    "tagline": {
+      "he": "מגידול ועד מכירה—כל תחנה מוסיפה שכבת אמת.",
+      "en": "From cultivation to sales, every station adds a layer of truth.",
+      "ar": "من الزراعة إلى البيع، كل محطة تضيف طبقة من الحقيقة."
+    },
+    "cta": { "he": "לדירוג האצווה", "en": "Rate the batch", "ar": "قيّم الدفعة" }
+  },
   "assets": {
     "logo": "logo-green.png",
     "bg1": "bg1.png",

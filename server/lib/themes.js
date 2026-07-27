@@ -1,10 +1,10 @@
-// טעינת ערכת נושא (theme) פעילה. הערכה נבחרת דרך משתנה הסביבה THEME (ברירת מחדל: seach).
+// טעינת ערכת נושא (theme) פעילה. הערכה נבחרת דרך משתנה הסביבה THEME (ברירת מחדל: atzvavote).
 // כל הערכות נמצאות ב-resources/themes/{name}/ ומכילות theme.json + נכסים (logo/bg/favicon).
 const fs = require('fs');
 const path = require('path');
 
 const THEMES_DIR = path.join(__dirname, '..', '..', 'resources', 'themes');
-const DEFAULT_THEME = 'seach';
+const DEFAULT_THEME = 'atzvavote';
 
 // THEME מוגדר ב-.env שבשורש הפרויקט (ולא ב-server/.env). השרת רץ עם cwd=server,
 // לכן טוענים במפורש את ה-.env השורשי כדי לאכלס את process.env.THEME (ללא דריסת קיימים).
@@ -30,7 +30,7 @@ function activeThemeName() {
   return DEFAULT_THEME;
 }
 
-// מיזוג הגדרות התגים: ערכת הנושא הפעילה גוברת, עם נפילה לערכת ברירת המחדל (seach)
+// מיזוג הגדרות התגים: ערכת הנושא הפעילה גוברת, עם נפילה לערכת ברירת המחדל.
 function resolveBadgeImages(activeName, active, fallback) {
   const out = {};
   const merge = (theme, themeName) => {
@@ -39,7 +39,7 @@ function resolveBadgeImages(activeName, active, fallback) {
       if (def && def.image) out[id] = `/theme-assets/${encodeURIComponent(def.image)}?theme=${themeName}`;
     }
   };
-  // קודם fallback (seach), אחר כך הפעילה — כך שהפעילה דורסת
+  // קודם fallback, אחר כך הפעילה — כך שהפעילה דורסת
   if (fallback) merge(fallback, DEFAULT_THEME);
   if (active && activeName !== DEFAULT_THEME) merge(active, activeName);
   return out;
@@ -57,6 +57,7 @@ function getActiveTheme() {
     name,
     display_name: active.display_name || { he: name, en: name, ar: name },
     meta: active.meta || {},
+    login: active.login || fallback.login || {},
     colors: active.colors || {},
     assets: {
       logo: assetUrl(assets.logo),

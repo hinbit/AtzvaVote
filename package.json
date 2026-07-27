@@ -8,6 +8,8 @@
     "db:create":    "npm --prefix server run db:create",
     "db:init":      "npm --prefix server run db:init",
     "db:seed":      "npm --prefix server run db:seed",
+    "db:fill_all":  "npm --prefix server run db:fill_all",
+    "test:themes":  "npm --prefix server run test:themes",
     "db:setup":     "npm --prefix server run db:setup",
     "db:reset":     "npm --prefix server run db:reset",
     "setup":        "npm run install:all && npm run db:setup",

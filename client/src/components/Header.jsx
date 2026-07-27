@@ -1,11 +1,13 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTranslation } from '../i18n/TranslationContext';
+import { useTheme } from '../context/ThemeContext';
 import LanguageSelector from './LanguageSelector';
 
 export default function Header() {
   const { user, logout, coinsEnabled, productsEnabled, battlesEnabled } = useAuth();
   const { t } = useTranslation();
+  const { assets } = useTheme();
   const nav = useNavigate();
 
   const doLogout = () => { logout(); nav('/login'); };
@@ -25,7 +27,7 @@ export default function Header() {
           ) : (
             <div className="header-avatar header-avatar-fallback">{(user?.name || '?').slice(0, 1)}</div>
           )}
-          <img className="header-logo-large header-logo-left" src="/theme-assets/logo-header.png" alt="logo" />
+          <img className="header-logo-large header-logo-left" src={assets.logo || '/favicon.svg'} alt="AtzvaVote" />
         </div>
 
         {user.isGuest ? (

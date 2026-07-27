@@ -1504,6 +1504,247 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: 0.02em; }
   margin-top: 4px;
 }
 
+/* ─────────── Theme-specific login identities ─────────── */
+.login-theme-seal {
+  position: absolute;
+  inset: 34px auto auto 34px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255,255,255,.22);
+  background: rgba(8,20,14,.3);
+  backdrop-filter: blur(10px);
+}
+.login-theme-seal span {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+  background: var(--gold);
+  font-size: 17px;
+}
+.login-theme-seal small {
+  color: rgba(255,255,255,.76);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+/* AtzvaVote — מאמר מערכתי כהה, מאזניים ואור חם */
+.login-variant-editorial {
+  grid-template-columns: 1.08fr .92fr;
+  background: #101b15;
+}
+.login-variant-editorial .login-hero {
+  background:
+    linear-gradient(120deg, rgba(8,18,12,.94), rgba(8,18,12,.38)),
+    var(--bg-image-1);
+  background-size: cover;
+  background-position: center;
+}
+.login-variant-editorial .login-hero h1 {
+  max-width: 760px;
+  font-size: clamp(72px, 8vw, 132px);
+  letter-spacing: -.035em;
+}
+.login-variant-editorial .login-form-area {
+  background:
+    linear-gradient(rgba(244,244,235,.78), rgba(244,244,235,.78)),
+    var(--bg-image-2);
+  background-size: cover;
+  background-position: 82% center;
+}
+.login-variant-editorial .guest-cta {
+  border-radius: 12px 3px 12px 3px;
+}
+
+/* Seach — חממה אורגנית: hero רחב, כרטיס רך וחי */
+.login-variant-cultivation {
+  grid-template-columns: 1.25fr .75fr;
+  background: #10291a;
+}
+.login-variant-cultivation .login-hero {
+  background:
+    radial-gradient(circle at 75% 24%, rgba(173,255,123,.2), transparent 34%),
+    linear-gradient(150deg, rgba(9,37,20,.9), rgba(18,74,40,.38)),
+    var(--bg-image-1);
+  background-size: cover;
+  background-position: center;
+}
+.login-variant-cultivation .login-hero::before {
+  content: 'GROW';
+  color: rgba(183,239,90,.055);
+  font-size: 330px;
+}
+.login-variant-cultivation .login-hero h1 {
+  max-width: 720px;
+  font-family: var(--font-body);
+  font-size: clamp(58px, 6.5vw, 104px);
+  font-weight: 900;
+  line-height: .98;
+}
+.login-variant-cultivation .login-form-area {
+  margin: 22px;
+  border-radius: 32px 4px 32px 4px;
+  background:
+    linear-gradient(rgba(239,247,230,.86), rgba(239,247,230,.86)),
+    var(--bg-image-2);
+  background-size: cover;
+  box-shadow: 0 32px 80px rgba(1,18,8,.28);
+}
+.login-variant-cultivation .login-theme-seal span,
+.login-variant-cultivation .guest-cta { border-radius: 50px; }
+
+/* Hinbit — אות דיגיטלי חד עם grid וקווי data */
+.login-variant-signal {
+  grid-template-columns: .88fr 1.12fr;
+  background-color: #071925;
+  background-image:
+    linear-gradient(rgba(80,208,192,.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(80,208,192,.07) 1px, transparent 1px);
+  background-size: 42px 42px;
+}
+.login-variant-signal .login-hero {
+  order: 2;
+  background:
+    linear-gradient(110deg, rgba(5,22,32,.96), rgba(8,44,49,.52)),
+    var(--bg-image-1);
+  background-size: cover;
+}
+.login-variant-signal .login-hero::before {
+  content: '0101';
+  color: rgba(83,223,200,.045);
+  font-size: 360px;
+}
+.login-variant-signal .login-hero h1 {
+  max-width: 780px;
+  font-size: clamp(54px, 6vw, 96px);
+  color: #ecfffa;
+}
+.login-variant-signal .login-form-area {
+  order: 1;
+  background:
+    linear-gradient(rgba(226,244,240,.91), rgba(226,244,240,.91)),
+    var(--bg-image-2);
+  background-size: cover;
+  border-inline-end: 1px solid rgba(80,208,192,.4);
+}
+.login-variant-signal .login-theme-seal { border-radius: 999px; }
+.login-variant-signal .login-theme-seal span { border-radius: 50%; }
+.login-variant-signal .guest-cta {
+  clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+}
+
+/* 4Pharma — סביבת עבודה קלינית ובהירה */
+.login-variant-clinical {
+  grid-template-columns: .92fr 1.08fr;
+  gap: 18px;
+  padding: 18px;
+  background: #e8f2f0;
+}
+.login-variant-clinical .login-hero {
+  border-radius: 8px 80px 8px 8px;
+  background:
+    linear-gradient(145deg, rgba(8,43,48,.9), rgba(10,120,108,.48)),
+    var(--bg-image-1);
+  background-size: cover;
+}
+.login-variant-clinical .login-hero::before {
+  content: '+';
+  inset: auto -20px -160px auto;
+  font-size: 520px;
+  color: rgba(255,255,255,.05);
+}
+.login-variant-clinical .login-hero h1 {
+  max-width: 740px;
+  font-family: var(--font-body);
+  font-size: clamp(55px, 5.8vw, 92px);
+  font-weight: 300;
+  line-height: 1.05;
+}
+.login-variant-clinical .login-form-area {
+  border-radius: 80px 8px 8px 8px;
+  background:
+    linear-gradient(rgba(255,255,255,.9), rgba(255,255,255,.9)),
+    var(--bg-image-2);
+  background-size: cover;
+}
+.login-variant-clinical .login-form {
+  padding: 30px;
+  border: 1px solid rgba(17,122,110,.18);
+  border-radius: 18px;
+  background: rgba(255,255,255,.72);
+  box-shadow: 0 22px 60px rgba(17,65,62,.1);
+}
+.login-variant-clinical .guest-cta { border-radius: 10px; }
+
+/* Friends — social card צבעוני, עגול ומשחקי */
+.login-variant-social {
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 16px;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(255,194,75,.26), transparent 26%),
+    radial-gradient(circle at 88% 86%, rgba(255,92,138,.22), transparent 26%),
+    #251735;
+}
+.login-variant-social .login-hero {
+  border-radius: 38px;
+  background:
+    linear-gradient(145deg, rgba(36,23,51,.83), rgba(92,54,134,.38)),
+    var(--bg-image-1);
+  background-size: cover;
+  transform: rotate(-.45deg);
+}
+.login-variant-social .login-hero::before {
+  content: '✦';
+  inset: auto -30px -150px auto;
+  color: rgba(255,194,75,.08);
+  font-size: 460px;
+}
+.login-variant-social .login-hero h1 {
+  max-width: 740px;
+  font-family: var(--font-body);
+  font-size: clamp(62px, 7vw, 112px);
+  font-weight: 900;
+  line-height: .94;
+}
+.login-variant-social .login-form-area {
+  margin: 34px;
+  border-radius: 38px;
+  background:
+    linear-gradient(rgba(255,248,238,.9), rgba(255,248,238,.9)),
+    var(--bg-image-2);
+  background-size: cover;
+  box-shadow: 10px 12px 0 var(--gold);
+  transform: rotate(.65deg);
+}
+.login-variant-social .login-form { transform: rotate(-.65deg); }
+.login-variant-social .login-theme-seal,
+.login-variant-social .login-theme-seal span,
+.login-variant-social .guest-cta { border-radius: 999px; }
+
+@media (max-width: 900px) {
+  .login-page[class*='login-variant-'] {
+    display: block;
+    padding: 0;
+  }
+  .login-page[class*='login-variant-'] .login-form-area {
+    width: 100%;
+    min-height: 100vh;
+    margin: 0;
+    padding: 100px 22px 36px;
+    border-radius: 0;
+    transform: none;
+  }
+  .login-page[class*='login-variant-'] .login-form { transform: none; }
+  .login-theme-seal { display: none; }
+}
+
 /* ─────────── Error / Success ─────────── */
 .alert {
   padding: 12px 16px;

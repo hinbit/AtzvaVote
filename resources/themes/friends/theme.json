@@ -13,6 +13,19 @@
       "ar": "تصويت الدفعة · أصدقاء"
     }
   },
+  "login": {
+    "variant": "social",
+    "icon": "✦",
+    "seal": { "he": "החבר׳ה יודעים", "en": "Friends know best", "ar": "الأصدقاء يعرفون" },
+    "kicker": { "he": "FRIENDS · PICK A SIDE", "en": "FRIENDS · PICK A SIDE", "ar": "FRIENDS · PICK A SIDE" },
+    "headline": { "he": "מה אתם אומרים?", "en": "WHAT'S YOUR CALL?", "ar": "ما هو اختياركم؟" },
+    "tagline": {
+      "he": "מצביעים יחד, מתווכחים בכיף—ורואים מי באמת הכי מדויק.",
+      "en": "Vote together, debate loudly, and find out who really knows.",
+      "ar": "صوّتوا معًا واكتشفوا من هو الأدق فعلًا."
+    },
+    "cta": { "he": "יאללה, אני בפנים", "en": "I'm in", "ar": "أنا مشارك" }
+  },
   "assets": {
     "logo": "logo.png",
     "bg1": "bg1.png",

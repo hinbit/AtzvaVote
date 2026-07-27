@@ -13,6 +13,19 @@
       "ar": "تصويت الدفعة · فارما"
     }
   },
+  "login": {
+    "variant": "clinical",
+    "icon": "✚",
+    "seal": { "he": "איכות מבוקרת", "en": "Quality controlled", "ar": "جودة مضبوطة" },
+    "kicker": { "he": "4PHARMA · QUALITY PULSE", "en": "4PHARMA · QUALITY PULSE", "ar": "4PHARMA · QUALITY PULSE" },
+    "headline": { "he": "כל מדד. בזמן הנכון.", "en": "EVERY SIGNAL. RIGHT ON TIME.", "ar": "كل مؤشر. في الوقت الصحيح." },
+    "tagline": {
+      "he": "דירוג מקצועי, עקבי ומתועד לאורך כל שרשרת האיכות.",
+      "en": "Professional, consistent scoring across the quality chain.",
+      "ar": "تقييم مهني ومتسق عبر سلسلة الجودة."
+    },
+    "cta": { "he": "פתיחת תחנת העבודה", "en": "Open workstation", "ar": "افتح محطة العمل" }
+  },
   "assets": {
     "logo": "logo.png",
     "bg1": "bg1.png",
